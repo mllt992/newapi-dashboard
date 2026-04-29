@@ -5,11 +5,11 @@ import StatsCard from '../components/StatsCard';
 import TrendChart from '../components/TrendChart';
 import TopModelsChart from '../components/TopModelsChart';
 import ModelHeatmap from '../components/ModelHeatmap';
-import { api, type OverviewSummary, type TrendItem, type TopModelItem, type HeatmapCell, type RealtimeMetrics } from '../api';
+import { useWebSocket } from '../hooks/useWebSocket';
+import { api, type OverviewSummary, type TrendItem, type TopModelItem, type HeatmapCell } from '../api';
 import dayjs from 'dayjs';
 
 const RANGE_KEY = 'dashboard_range';
-const REFRESH_KEY = 'dashboard_refresh_interval';
 const RANGE_OPTIONS = [
   { label: '7天', value: 7 },
   { label: '14天', value: 14 },
@@ -19,17 +19,11 @@ const REFRESH_OPTIONS = [
   { label: '10秒', value: 10000 },
   { label: '30秒', value: 30000 },
   { label: '1分钟', value: 60000 },
-  { label: '关闭', value: 0 },
 ];
 
 function loadRange(): number {
   const saved = localStorage.getItem(RANGE_KEY);
   return saved ? parseInt(saved, 10) : 7;
-}
-
-function loadRefreshInterval(): number {
-  const saved = localStorage.getItem(REFRESH_KEY);
-  return saved ? parseInt(saved, 10) : 30000;
 }
 
 function StatBox({ label, value, sub, color }: { label: string; value: string; sub?: string; color: string }) {
@@ -54,18 +48,13 @@ function StatBox({ label, value, sub, color }: { label: string; value: string; s
 
 export default function Dashboard() {
   const [summary, setSummary] = useState<OverviewSummary | null>(null);
-  const [metrics, setMetrics] = useState<RealtimeMetrics | null>(null);
+  const { metrics, connected, setInterval: setWsInterval, currentInterval } = useWebSocket();
   const [trend, setTrend] = useState<TrendItem[]>([]);
   const [topModels, setTopModels] = useState<TopModelItem[]>([]);
   const [heatmap, setHeatmap] = useState<HeatmapCell[]>([]);
   const [loading, setLoading] = useState(true);
   const [rangeDays, setRangeDays] = useState(loadRange);
-  const [refreshInterval, setRefreshInterval] = useState(loadRefreshInterval);
   const [successRate, setSuccessRate] = useState({ success: 0, failed: 0, rate: 0 });
-
-  const fetchRealtimeMetrics = () => {
-    api.getRealtimeMetrics().then(setMetrics).catch(console.error);
-  };
 
   const fetchMainData = () => {
     const end = dayjs().endOf('day').unix();
@@ -95,19 +84,11 @@ export default function Dashboard() {
 
   useEffect(() => {
     fetchMainData();
-    fetchRealtimeMetrics();
-    const metricsTimer = setInterval(fetchRealtimeMetrics, refreshInterval);
-    return () => clearInterval(metricsTimer);
-  }, [rangeDays, refreshInterval]);
+  }, [rangeDays]);
 
   const handleRangeChange = (val: number) => {
     setRangeDays(val);
     localStorage.setItem(RANGE_KEY, String(val));
-  };
-
-  const handleRefreshChange = (val: number) => {
-    setRefreshInterval(val);
-    localStorage.setItem(REFRESH_KEY, String(val));
   };
 
   const calcTrend = (current: number, previous: number) => {
@@ -115,9 +96,6 @@ export default function Dashboard() {
     return ((current - previous) / previous) * 100;
   };
 
-  const avgRequests = trend.length > 0
-    ? Math.round(trend.reduce((s, d) => s + Number(d.total_requests), 0) / trend.length)
-    : 0;
   const prevDay = trend.length >= 2 ? trend[trend.length - 2] : null;
   const totalCost = trend.length > 0
     ? trend.reduce((s, d) => s + Number(d.total_cost || 0), 0)
@@ -131,10 +109,23 @@ export default function Dashboard() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <div>
           <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: '#1e293b' }}>数据概览</h2>
-          <p style={{ margin: '4px 0 0', fontSize: 12, color: '#94a3b8' }}>{new Date().toLocaleDateString('zh-CN')}</p>
+          <p style={{ margin: '4px 0 0', fontSize: 12, color: '#94a3b8' }}>
+            {new Date().toLocaleDateString('zh-CN')}
+            <span style={{ marginLeft: 8, color: connected ? '#10b981' : '#ef4444' }}>
+              {connected ? '● 实时连接' : '○ 离线'}
+            </span>
+          </p>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <Segmented value={refreshInterval} onChange={(v) => handleRefreshChange(v as number)} options={REFRESH_OPTIONS} size="small" />
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ fontSize: 11, color: '#94a3b8', whiteSpace: 'nowrap' }}>刷新:</span>
+            <Segmented
+              value={currentInterval}
+              onChange={(v) => setWsInterval(v as number)}
+              options={REFRESH_OPTIONS}
+              size="small"
+            />
+          </div>
           <Segmented value={rangeDays} onChange={(v) => handleRangeChange(v as number)} options={RANGE_OPTIONS} />
         </div>
       </div>
@@ -215,7 +206,7 @@ export default function Dashboard() {
         </Col>
       </Row>
 
-      {/* 第四行：模型可用性热力图 */}
+      {/* 模型可用性热力图 */}
       <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
         <Col span={24}>
           <div style={{
@@ -229,7 +220,7 @@ export default function Dashboard() {
         </Col>
       </Row>
 
-      {/* 第五行：趋势图 + Top模型 */}
+      {/* 趋势图 + Top模型 */}
       <Row gutter={[12, 12]}>
         <Col xs={24} xl={16}>
           <div style={{

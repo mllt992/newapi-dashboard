@@ -5,6 +5,7 @@ import config from './config.js';
 import overviewRoutes from './routes/overview.js';
 import tokenRoutes from './routes/tokens.js';
 import heatmapRoutes from './routes/heatmap.js';
+import { initWebSocket } from './websocket.js';
 
 const app = express();
 
@@ -20,6 +21,7 @@ app.get('/api/health', (_req, res) => {
 });
 
 const server = http.createServer(app);
+initWebSocket(server);
 
 server.listen(config.PORT, () => {
   console.log(`[Server] Running on http://localhost:${config.PORT}`);
