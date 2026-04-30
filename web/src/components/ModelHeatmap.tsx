@@ -20,33 +20,59 @@ interface HeatmapRow {
   modelName: string;
   cells: ProcessedCell[];
   totalRequests: number;
-  successRate: number;
 }
 
-// 获取当前北京时间小时 (0-23)
-function getCurrentBeijingHour(): number {
+// 获取当前北京时间
+function getCurrentBeijingTime(): { hour: number; minute: number } {
   const now = new Date();
   const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
-  return new Date(utc + 8 * 3600000).getHours();
+  const beijing = new Date(utc + 8 * 3600000);
+  return {
+    hour: beijing.getHours(),
+    minute: beijing.getMinutes(),
+  };
 }
 
-// 生成时间轴标签
-function generateTimeLabels(hourCount: number): { labels: string[]; slotHours: number[] } {
-  const currentHour = getCurrentBeijingHour();
-  const labels: string[] = [];
-  const slotHours: number[] = [];
+// 获取当前北京时间戳（秒）
+function getCurrentBeijingTimestamp(): number {
+  const now = new Date();
+  const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
+  const beijing = new Date(utc + 8 * 3600000);
+  return Math.floor(beijing.getTime() / 1000);
+}
 
-  for (let i = hourCount - 1; i >= 0; i--) {
-    const hour = (currentHour - i + 24) % 24;
-    slotHours.push(hour);
-    if (i === hourCount - 1) {
+// 生成时间轴标签和对应的时间戳
+function generateTimeAxis(hourCount: number): {
+  labels: string[];
+  beijingHours: number[];
+  hoursAgo: number[];
+} {
+  const { hour: currentHour, minute } = getCurrentBeijingTime();
+  const labels: string[] = [];
+  const beijingHours: number[] = [];
+  const hoursAgo: number[] = [];
+
+  // 从最旧的时间点到最近的时间点
+  // 索引 0 = 最旧的（hourCount 小时前）
+  // 索引 hourCount-1 = 最近的（现在）
+  for (let i = 0; i < hourCount; i++) {
+    // 这个位置代表"多少小时前"
+    const ago = hourCount - 1 - i;
+    hoursAgo.push(ago);
+
+    // 从"多少小时前"反推对应的小时
+    const hour = (currentHour - ago + 24) % 24;
+    beijingHours.push(hour);
+
+    // 标签
+    if (ago === 0) {
       labels.push('现在');
     } else {
       labels.push(`${String(hour).padStart(2, '0')}`);
     }
   }
 
-  return { labels, slotHours };
+  return { labels, beijingHours, hoursAgo };
 }
 
 export default function ModelHeatmap({
@@ -72,13 +98,17 @@ export default function ModelHeatmap({
   }, []);
 
   const hourCount = timeRange;
-  const { labels, slotHours } = useMemo(() => generateTimeLabels(hourCount), [hourCount, mounted]);
+  const { labels, beijingHours, hoursAgo } = useMemo(
+    () => generateTimeAxis(hourCount),
+    [hourCount, mounted]
+  );
+  const currentBeijingHour = getCurrentBeijingTime().hour;
 
   // 处理数据
   const heatmapData = useMemo(() => {
     // 按模型分组
     const modelMap: Record<string, Map<number, ProcessedCell>> = {};
-    const modelTotals: Record<string, { requests: number; success: number }> = {};
+    const modelTotals: Record<string, number> = {};
 
     data.forEach(item => {
       const model = item.model_name;
@@ -88,7 +118,7 @@ export default function ModelHeatmap({
 
       if (!modelMap[model]) {
         modelMap[model] = new Map();
-        modelTotals[model] = { requests: 0, success: 0 };
+        modelTotals[model] = 0;
       }
 
       const existing = modelMap[model].get(beijingHour);
@@ -107,147 +137,90 @@ export default function ModelHeatmap({
         });
       }
 
-      modelTotals[model].requests += requestCount;
-      modelTotals[model].success += successCount;
+      modelTotals[model] += requestCount;
     });
 
-    // 转换为数组并排序（按总请求数降序）
+    // 转换为数组并排序
     const rows: HeatmapRow[] = Object.keys(modelMap)
       .map(model => {
-        const cells = slotHours.map(hour => {
-          return modelMap[model].get(hour) || {
-            requestCount: 0,
-            successCount: 0,
-            successRate: 0,
-            failRate: 0,
-          };
+        // 为每个时间槽填充数据
+        const cells = beijingHours.map((hour, i) => {
+          const cell = modelMap[model].get(hour);
+          return cell || { requestCount: 0, successCount: 0, successRate: 0, failRate: 0 };
         });
-        const totals = modelTotals[model];
+
         return {
           modelName: model,
           cells,
-          totalRequests: totals.requests,
-          successRate: totals.requests > 0 ? totals.success / totals.requests : 0,
+          totalRequests: modelTotals[model],
         };
       })
       .filter(row => row.totalRequests > 0)
       .sort((a, b) => b.totalRequests - a.totalRequests)
-      .slice(0, 12);
+      .slice(0, 10);
 
     return rows;
-  }, [data, slotHours]);
+  }, [data, beijingHours]);
 
   // 计算格子尺寸
   const labelWidth = 140;
   const availableWidth = containerWidth - labelWidth - 40;
   const gapSize = 3;
   const cellSize = Math.min(
-    28,
-    Math.max(16, (availableWidth - (hourCount - 1) * gapSize) / hourCount)
+    32,
+    Math.max(18, (availableWidth - (hourCount - 1) * gapSize) / hourCount)
   );
   const totalWidth = labelWidth + hourCount * cellSize + (hourCount - 1) * gapSize + 20;
 
   if (!mounted || loading) {
     return (
       <div style={{
-        height: 400,
-        borderRadius: 20,
-        background: 'rgba(255, 255, 255, 0.6)',
-        backdropFilter: 'blur(20px)',
-        border: '1px solid rgba(255, 255, 255, 0.8)',
-        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.08)',
+        height: 380,
+        borderRadius: 16,
+        background: 'rgba(248, 250, 252, 0.9)',
+        border: '1px solid #e2e8f0',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        color: '#64748b',
+        color: '#94a3b8',
       }}>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{
-            width: 32,
-            height: 32,
-            border: '3px solid #e2e8f0',
-            borderTopColor: '#6366f1',
-            borderRadius: '50%',
-            animation: 'spin 1s linear infinite',
-            margin: '0 auto 12px',
-          }} />
-          加载中...
-        </div>
+        加载中...
       </div>
     );
   }
+
+  // 计算统计
+  const totalSuccess = heatmapData.reduce(
+    (s, r) => s + r.cells.reduce((ss, c) => ss + c.successCount, 0), 0
+  );
+  const totalRequests = heatmapData.reduce(
+    (s, r) => s + r.cells.reduce((ss, c) => ss + c.requestCount, 0), 0
+  );
+  const avgSuccessRate = totalRequests > 0 ? (totalSuccess / totalRequests * 100).toFixed(1) : '0.0';
 
   return (
     <div
       ref={containerRef}
       style={{
-        borderRadius: 20,
-        background: 'rgba(255, 255, 255, 0.7)',
-        backdropFilter: 'blur(20px)',
-        border: '1px solid rgba(255, 255, 255, 0.9)',
-        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.06)',
-        padding: 24,
-        overflow: 'hidden',
+        borderRadius: 16,
+        background: '#fff',
+        border: '1px solid #e2e8f0',
+        padding: 20,
       }}
     >
-      <style>{`
-        @keyframes spin {
-          to { transform: rotate(360deg); }
-        }
-        @keyframes fadeIn {
-          from { opacity: 0; transform: translateY(10px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        .heatmap-row {
-          animation: fadeIn 0.4s ease-out forwards;
-          opacity: 0;
-        }
-        .heatmap-row:nth-child(1) { animation-delay: 0ms; }
-        .heatmap-row:nth-child(2) { animation-delay: 50ms; }
-        .heatmap-row:nth-child(3) { animation-delay: 100ms; }
-        .heatmap-row:nth-child(4) { animation-delay: 150ms; }
-        .heatmap-row:nth-child(5) { animation-delay: 200ms; }
-        .heatmap-row:nth-child(6) { animation-delay: 250ms; }
-        .heatmap-row:nth-child(7) { animation-delay: 300ms; }
-        .heatmap-row:nth-child(8) { animation-delay: 350ms; }
-        .heatmap-row:nth-child(9) { animation-delay: 400ms; }
-        .heatmap-row:nth-child(10) { animation-delay: 450ms; }
-        .heatmap-row:nth-child(11) { animation-delay: 500ms; }
-        .heatmap-row:nth-child(12) { animation-delay: 550ms; }
-        .heatmap-cell {
-          transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s;
-        }
-        .heatmap-cell:hover {
-          transform: scale(1.2);
-          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
-          z-index: 10;
-        }
-      `}</style>
-
       {/* 头部 */}
       <div style={{
         display: 'flex',
         justifyContent: 'space-between',
-        alignItems: 'flex-start',
-        marginBottom: 20,
+        alignItems: 'center',
+        marginBottom: 16,
       }}>
         <div>
-          <h3 style={{
-            margin: 0,
-            fontSize: 18,
-            fontWeight: 700,
-            background: 'linear-gradient(135deg, #1e293b 0%, #475569 100%)',
-            WebkitBackgroundClip: 'text',
-            WebkitTextFillColor: 'transparent',
-          }}>
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: '#1e293b' }}>
             模型可用性
           </h3>
-          <p style={{
-            margin: '6px 0 0',
-            fontSize: 13,
-            color: '#64748b',
-          }}>
-            实时监控 · 北京时间 · 绿色成功 / 红色失败
+          <p style={{ margin: '4px 0 0', fontSize: 12, color: '#64748b' }}>
+            北京时间 · 绿色成功 / 红色失败 · 共 {totalRequests.toLocaleString()} 请求
           </p>
         </div>
 
@@ -258,55 +231,8 @@ export default function ModelHeatmap({
             { label: '24小时', value: 24 },
             { label: '7天', value: 168 },
           ]}
-          style={{ background: 'rgba(241, 245, 249, 0.8)' }}
+          size="small"
         />
-      </div>
-
-      {/* 统计概览 */}
-      <div style={{
-        display: 'flex',
-        gap: 16,
-        marginBottom: 20,
-        padding: '12px 16px',
-        background: 'rgba(99, 102, 241, 0.05)',
-        borderRadius: 12,
-        border: '1px solid rgba(99, 102, 241, 0.1)',
-      }}>
-        <div style={{ flex: 1, textAlign: 'center' }}>
-          <div style={{ fontSize: 20, fontWeight: 700, color: '#6366f1' }}>
-            {heatmapData.length}
-          </div>
-          <div style={{ fontSize: 11, color: '#64748b' }}>监控模型</div>
-        </div>
-        <div style={{
-          width: 1,
-          background: 'rgba(99, 102, 241, 0.2)',
-          margin: '4px 0',
-        }} />
-        <div style={{ flex: 1, textAlign: 'center' }}>
-          <div style={{ fontSize: 20, fontWeight: 700, color: '#10b981' }}>
-            {heatmapData.reduce((s, r) => s + r.cells.reduce((ss, c) => ss + c.successCount, 0), 0).toLocaleString()}
-          </div>
-          <div style={{ fontSize: 11, color: '#64748b' }}>成功请求</div>
-        </div>
-        <div style={{
-          width: 1,
-          background: 'rgba(99, 102, 241, 0.2)',
-          margin: '4px 0',
-        }} />
-        <div style={{ flex: 1, textAlign: 'center' }}>
-          <div style={{ fontSize: 20, fontWeight: 700, color: '#f59e0b' }}>
-            {(
-              heatmapData.reduce((s, r) => s + r.totalRequests, 0) > 0
-                ? (
-                  heatmapData.reduce((s, r) => s + r.cells.reduce((ss, c) => ss + c.successCount, 0), 0) /
-                  heatmapData.reduce((s, r) => s + r.totalRequests, 0) * 100
-                )
-                : 0
-            ).toFixed(1)}%
-          </div>
-          <div style={{ fontSize: 11, color: '#64748b' }}>总成功率</div>
-        </div>
       </div>
 
       {/* 热力图主体 */}
@@ -316,7 +242,7 @@ export default function ModelHeatmap({
           <div style={{
             display: 'flex',
             marginLeft: labelWidth,
-            marginBottom: 8,
+            marginBottom: 6,
             gap: gapSize,
           }}>
             {labels.map((label, i) => (
@@ -325,8 +251,8 @@ export default function ModelHeatmap({
                 style={{
                   width: cellSize,
                   textAlign: 'center',
-                  fontSize: 10,
-                  fontFamily: 'SF Mono, Monaco, monospace',
+                  fontSize: 9,
+                  fontFamily: 'monospace',
                   color: label === '现在' ? '#6366f1' : '#94a3b8',
                   fontWeight: label === '现在' ? 600 : 400,
                 }}
@@ -338,10 +264,9 @@ export default function ModelHeatmap({
 
           {/* 行 */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: gapSize }}>
-            {heatmapData.map((row, rowIndex) => (
+            {heatmapData.map((row) => (
               <div
                 key={row.modelName}
-                className="heatmap-row"
                 style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -349,27 +274,19 @@ export default function ModelHeatmap({
                 }}
               >
                 {/* 模型名称 */}
-                <Tooltip title={
-                  <div>
-                    <div style={{ fontWeight: 600 }}>{row.modelName}</div>
-                    <div style={{ fontSize: 11, opacity: 0.8 }}>
-                      请求: {row.totalRequests.toLocaleString()}
-                    </div>
-                  </div>
-                }
-                placement="left"
+                <Tooltip
+                  title={row.modelName}
+                  placement="left"
                 >
                   <div
                     style={{
                       width: labelWidth - 8,
-                      fontSize: 12,
-                      fontWeight: 500,
+                      fontSize: 11,
                       color: '#475569',
                       whiteSpace: 'nowrap',
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
-                      paddingRight: 12,
-                      cursor: 'default',
+                      paddingRight: 8,
                     }}
                   >
                     {row.modelName.length > 18
@@ -380,111 +297,74 @@ export default function ModelHeatmap({
 
                 {/* 格子 */}
                 <div style={{ display: 'flex', gap: gapSize }}>
-                  {row.cells.map((cell, cellIndex) => {
+                  {row.cells.map((cell, i) => {
                     const hasData = cell.requestCount > 0;
                     const successWidth = cell.successRate * 100;
                     const failWidth = cell.failRate * 100;
+                    const timeLabel = labels[i];
 
                     return (
                       <Tooltip
-                        key={cellIndex}
+                        key={i}
                         title={
                           hasData ? (
-                            <div style={{ padding: '4px 0' }}>
-                              <div style={{ fontWeight: 600, marginBottom: 8 }}>
-                                {row.modelName}
-                              </div>
-                              <div style={{ fontSize: 11, marginBottom: 4 }}>
-                                时间: {labels[cellIndex]}
-                              </div>
+                            <div style={{ fontSize: 11 }}>
+                              <div style={{ fontWeight: 600, marginBottom: 4 }}>{row.modelName}</div>
+                              <div>时间: {timeLabel}</div>
+                              <div>请求: {cell.requestCount}</div>
+                              <div style={{ color: '#10b981' }}>成功: {cell.successCount}</div>
+                              <div style={{ color: '#f87171' }}>失败: {cell.requestCount - cell.successCount}</div>
                               <div style={{
-                                fontSize: 11,
-                                display: 'flex',
-                                justifyContent: 'space-between',
-                                gap: 16,
-                              }}>
-                                <span>请求:</span>
-                                <span style={{ fontWeight: 600 }}>{cell.requestCount}</span>
-                              </div>
-                              <div style={{
-                                fontSize: 11,
-                                color: '#10b981',
-                                display: 'flex',
-                                justifyContent: 'space-between',
-                                gap: 16,
-                              }}>
-                                <span>成功:</span>
-                                <span style={{ fontWeight: 600 }}>{cell.successCount}</span>
-                              </div>
-                              <div style={{
-                                fontSize: 11,
-                                color: '#f87171',
-                                display: 'flex',
-                                justifyContent: 'space-between',
-                                gap: 16,
-                              }}>
-                                <span>失败:</span>
-                                <span style={{ fontWeight: 600 }}>{cell.requestCount - cell.successCount}</span>
-                              </div>
-                              <div style={{
-                                marginTop: 6,
-                                padding: '4px 8px',
-                                background: cell.successRate >= 0.9 ? 'rgba(16, 185, 129, 0.2)'
-                                  : cell.successRate >= 0.5 ? 'rgba(245, 158, 11, 0.2)'
-                                  : 'rgba(239, 68, 68, 0.2)',
-                                borderRadius: 4,
-                                textAlign: 'center',
+                                marginTop: 4,
                                 fontWeight: 600,
-                                color: cell.successRate >= 0.9 ? '#10b981'
-                                  : cell.successRate >= 0.5 ? '#f59e0b'
-                                  : '#ef4444',
+                                color: cell.successRate >= 0.9 ? '#10b981' : cell.successRate >= 0.5 ? '#f59e0b' : '#ef4444'
                               }}>
-                                {(cell.successRate * 100).toFixed(1)}% 成功
+                                成功率: {(cell.successRate * 100).toFixed(1)}%
                               </div>
                             </div>
                           ) : (
-                            <div style={{ padding: '4px 0', color: '#94a3b8' }}>
-                              <div style={{ fontWeight: 600, marginBottom: 4 }}>{row.modelName}</div>
-                              <div style={{ fontSize: 11 }}>{labels[cellIndex]}</div>
-                              <div style={{ fontSize: 11, marginTop: 4 }}>无数据</div>
+                            <div style={{ fontSize: 11, color: '#94a3b8' }}>
+                              <div>{row.modelName}</div>
+                              <div>{timeLabel}</div>
+                              <div>无数据</div>
                             </div>
                           )
                         }
                         placement="top"
                       >
                         <div
-                          className="heatmap-cell"
                           style={{
                             width: cellSize,
                             height: cellSize,
-                            cursor: 'pointer',
                             borderRadius: 4,
                             overflow: 'hidden',
-                            background: hasData ? undefined : 'rgba(148, 163, 184, 0.08)',
+                            background: hasData ? undefined : '#f1f5f9',
+                            cursor: 'pointer',
+                            transition: 'transform 0.15s, box-shadow 0.15s',
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.transform = 'scale(1.15)';
+                            e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.transform = 'scale(1)';
+                            e.currentTarget.style.boxShadow = 'none';
                           }}
                         >
                           {hasData && (
-                            <div
-                              style={{
-                                width: '100%',
-                                height: '100%',
-                                display: 'flex',
-                              }}
-                            >
+                            <div style={{ width: '100%', height: '100%', display: 'flex' }}>
                               <div
                                 style={{
                                   width: `${successWidth}%`,
                                   height: '100%',
-                                  background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-                                  transition: 'width 0.3s',
+                                  background: 'linear-gradient(180deg, #22c55e 0%, #16a34a 100%)',
                                 }}
                               />
                               <div
                                 style={{
                                   width: `${failWidth}%`,
                                   height: '100%',
-                                  background: 'linear-gradient(135deg, #f87171 0%, #dc2626 100%)',
-                                  transition: 'width 0.3s',
+                                  background: 'linear-gradient(180deg, #f87171 0%, #dc2626 100%)',
                                 }}
                               />
                             </div>
@@ -504,38 +384,40 @@ export default function ModelHeatmap({
       <div style={{
         display: 'flex',
         justifyContent: 'center',
-        gap: 24,
-        marginTop: 20,
-        paddingTop: 16,
-        borderTop: '1px solid rgba(148, 163, 184, 0.1)',
+        gap: 20,
+        marginTop: 16,
+        paddingTop: 12,
+        borderTop: '1px solid #f1f5f9',
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <div style={{
-            width: 20,
-            height: 12,
+            width: 16,
+            height: 16,
             borderRadius: 3,
-            background: 'linear-gradient(90deg, #10b981 0%, #059669 100%)',
+            background: 'linear-gradient(180deg, #22c55e 0%, #16a34a 100%)',
           }} />
-          <span style={{ fontSize: 12, color: '#64748b' }}>成功</span>
+          <span style={{ fontSize: 11, color: '#64748b' }}>成功</span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <div style={{
-            width: 20,
-            height: 12,
+            width: 16,
+            height: 16,
             borderRadius: 3,
-            background: 'linear-gradient(90deg, #f87171 0%, #dc2626 100%)',
+            background: 'linear-gradient(180deg, #f87171 0%, #dc2626 100%)',
           }} />
-          <span style={{ fontSize: 12, color: '#64748b' }}>失败</span>
+          <span style={{ fontSize: 11, color: '#64748b' }}>失败</span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <div style={{
-            width: 20,
-            height: 12,
+            width: 16,
+            height: 16,
             borderRadius: 3,
-            background: 'rgba(148, 163, 184, 0.15)',
-            border: '1px dashed rgba(148, 163, 184, 0.3)',
+            background: '#f1f5f9',
           }} />
-          <span style={{ fontSize: 12, color: '#64748b' }}>无数据</span>
+          <span style={{ fontSize: 11, color: '#64748b' }}>无数据</span>
+        </div>
+        <div style={{ fontSize: 11, color: '#64748b', marginLeft: 8 }}>
+          成功率 {avgSuccessRate}%
         </div>
       </div>
     </div>
