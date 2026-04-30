@@ -22,7 +22,8 @@ services:
       - SQL_DSN=${SQL_DSN}
       - REDIS_CONN_STRING=redis://default:${REDIS_PASSWORD:-123456}@redis:${REDIS_PORT:-6379}
       - PORT=3002
-      - QUOTA_PER_UNIT=${QUOTA_PER_UNIT:-500000}
+      - COST_RATE=${COST_RATE:-0.0001}
+      - REFRESH_INTERVAL=${REFRESH_INTERVAL:-30000}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3002/api/health"]

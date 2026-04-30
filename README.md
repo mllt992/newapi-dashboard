@@ -104,13 +104,13 @@ docker-compose up -d --build
 
 优先级：**环境变量 > `env.config.json`**（`server/src/config.ts`）。
 
-| Key | 说明 | 示例 |
-| --- | --- | --- |
-| `SQL_DSN` | MySQL DSN（new-api 格式） | `user:pass@tcp(host:3306)/db` |
-| `REDIS_CONN_STRING` | Redis 连接串 | `redis://default:123456@localhost:6379` |
-| `PORT` | 后端监听端口 | `3002` |
-| `QUOTA_PER_UNIT` | Quota → 美元换算系数（new-api 默认 500000） | `500000` |
-| `REFRESH_INTERVAL` | WebSocket 推送间隔（毫秒，可选） | `30000` |
+| Key | 是否必填 | 说明 | 默认值 |
+| --- | --- | --- | --- |
+| `SQL_DSN` | ✅ | new-api MySQL DSN，格式 `user:pass@tcp(host:port)/db`，仅需 `SELECT` 权限 | — |
+| `REDIS_CONN_STRING` | ✅ | Redis 连接串，用于查询结果短 TTL 缓存 | — |
+| `PORT` |   | 后端 HTTP 端口（容器内） | `3002` |
+| `COST_RATE` |   | Token → 美元换算系数（用于"花费"统计），按渠道平均价校正 | `0.0001` |
+| `REFRESH_INTERVAL` |   | WebSocket 实时指标推送间隔（毫秒） | `30000` |
 
 > ⚠️ **不要把真实数据库凭据提交到仓库**。`.env` 与 `env.config.json` 已在 `.gitignore` 中。
 
