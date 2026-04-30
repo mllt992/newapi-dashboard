@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useRef, useCallback } from 'react';
+import { useEffect, useState, useMemo, useRef } from 'react';
 import { Segmented, Tooltip } from 'antd';
 import type { HeatmapCell } from '../api';
 
@@ -147,56 +147,6 @@ export default function ModelHeatmap({
   );
   const totalWidth = labelWidth + hourCount * cellSize + (hourCount - 1) * gapSize + 20;
 
-  // 渲染格子内容
-  const renderCell = useCallback((cell: ProcessedCell, isHovered: boolean) => {
-    const hasData = cell.requestCount > 0;
-    if (!hasData) {
-      return (
-        <div
-          style={{
-            width: '100%',
-            height: '100%',
-            background: 'rgba(148, 163, 184, 0.08)',
-            borderRadius: 4,
-          }}
-        />
-      );
-    }
-
-    const successWidth = cell.successRate * 100;
-    const failWidth = cell.failRate * 100;
-
-    return (
-      <div
-        style={{
-          width: '100%',
-          height: '100%',
-          display: 'flex',
-          borderRadius: 4,
-          overflow: 'hidden',
-          transform: isHovered ? 'scale(1.15)' : 'scale(1)',
-          transition: 'transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1)',
-          boxShadow: isHovered ? '0 8px 24px rgba(0, 0, 0, 0.25)' : 'none',
-        }}
-      >
-        <div
-          style={{
-            width: `${successWidth}%`,
-            height: '100%',
-            background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-          }}
-        />
-        <div
-          style={{
-            width: `${failWidth}%`,
-            height: '100%',
-            background: 'linear-gradient(135deg, #f87171 0%, #dc2626 100%)',
-          }}
-        />
-      </div>
-    );
-  }, []);
-
   if (!mounted || loading) {
     return (
       <div style={{
@@ -264,6 +214,14 @@ export default function ModelHeatmap({
         .heatmap-row:nth-child(10) { animation-delay: 450ms; }
         .heatmap-row:nth-child(11) { animation-delay: 500ms; }
         .heatmap-row:nth-child(12) { animation-delay: 550ms; }
+        .heatmap-cell {
+          transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s;
+        }
+        .heatmap-cell:hover {
+          transform: scale(1.2);
+          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+          z-index: 10;
+        }
       `}</style>
 
       {/* 头部 */}
@@ -423,13 +381,13 @@ export default function ModelHeatmap({
                 {/* 格子 */}
                 <div style={{ display: 'flex', gap: gapSize }}>
                   {row.cells.map((cell, cellIndex) => {
-                    const [isHovered, setIsHovered] = useState(false);
                     const hasData = cell.requestCount > 0;
+                    const successWidth = cell.successRate * 100;
+                    const failWidth = cell.failRate * 100;
 
                     return (
                       <Tooltip
                         key={cellIndex}
-                        visible={isHovered}
                         title={
                           hasData ? (
                             <div style={{ padding: '4px 0' }}>
@@ -495,15 +453,42 @@ export default function ModelHeatmap({
                         placement="top"
                       >
                         <div
+                          className="heatmap-cell"
                           style={{
                             width: cellSize,
                             height: cellSize,
                             cursor: 'pointer',
+                            borderRadius: 4,
+                            overflow: 'hidden',
+                            background: hasData ? undefined : 'rgba(148, 163, 184, 0.08)',
                           }}
-                          onMouseEnter={() => setIsHovered(true)}
-                          onMouseLeave={() => setIsHovered(false)}
                         >
-                          {renderCell(cell, isHovered)}
+                          {hasData && (
+                            <div
+                              style={{
+                                width: '100%',
+                                height: '100%',
+                                display: 'flex',
+                              }}
+                            >
+                              <div
+                                style={{
+                                  width: `${successWidth}%`,
+                                  height: '100%',
+                                  background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                                  transition: 'width 0.3s',
+                                }}
+                              />
+                              <div
+                                style={{
+                                  width: `${failWidth}%`,
+                                  height: '100%',
+                                  background: 'linear-gradient(135deg, #f87171 0%, #dc2626 100%)',
+                                  transition: 'width 0.3s',
+                                }}
+                              />
+                            </div>
+                          )}
                         </div>
                       </Tooltip>
                     );
