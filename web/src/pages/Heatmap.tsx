@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Row, Col, Spin, Progress } from 'antd';
 import { api, type ModelSuccessRate, type TopModelItem } from '../api';
+import { useSortable } from '../utils/useSortable';
 import dayjs from 'dayjs';
 
 export default function ModelUsage() {
@@ -83,9 +84,12 @@ export default function ModelUsage() {
               <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: '#1e293b' }}>请求量排行 TOP 10</h3>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {topModels.slice(0, 10).map((item, i) => {
-                const maxReq = topModels[0]?.request_count || 1;
-                const percent = (Number(item.request_count) / maxReq) * 100;
+              {[...topModels]
+                .sort((a, b) => Number(b.request_count) - Number(a.request_count))
+                .slice(0, 10)
+                .map((item, i, arr) => {
+                  const maxReq = Number(arr[0]?.request_count) || 1;
+                  const percent = (Number(item.request_count) / maxReq) * 100;
                 return (
                   <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                     <div style={{ width: 24, height: 24, borderRadius: 6, background: i < 3 ? ['#f59e0b', '#94a3b8', '#cd7f32'][i] : '#e2e8f0', color: i < 3 ? '#fff' : '#64748b', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600 }}>
@@ -203,39 +207,75 @@ export default function ModelUsage() {
         <div style={{ marginBottom: 16 }}>
           <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: '#1e293b' }}>模型详细数据</h3>
         </div>
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr style={{ borderBottom: '1px solid #e2e8f0' }}>
-                <th style={{ padding: '14px 12px', textAlign: 'left', color: '#64748b', fontSize: 12 }}>模型</th>
-                <th style={{ padding: '14px 12px', textAlign: 'right', color: '#64748b', fontSize: 12 }}>总请求</th>
-                <th style={{ padding: '14px 12px', textAlign: 'right', color: '#64748b', fontSize: 12 }}>成功</th>
-                <th style={{ padding: '14px 12px', textAlign: 'right', color: '#64748b', fontSize: 12 }}>成功率</th>
-                <th style={{ padding: '14px 12px', textAlign: 'right', color: '#64748b', fontSize: 12 }}>平均耗时</th>
-              </tr>
-            </thead>
-            <tbody>
-              {successRates.slice(0, 15).map((item, i) => {
-                const rate = Number(item.success_rate);
-                const bgColor = rate >= 90 ? '#10b981' : rate >= 50 ? '#f59e0b' : '#ef4444';
-                return (
-                  <tr key={i} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                    <td style={{ padding: '12px', color: '#6366f1', fontSize: 13, fontWeight: 500 }}>{item.model_name || '(空)'}</td>
-                    <td style={{ padding: '12px', color: '#475569', fontSize: 13, textAlign: 'right' }}>{Number(item.total_requests).toLocaleString()}</td>
-                    <td style={{ padding: '12px', color: '#475569', fontSize: 13, textAlign: 'right' }}>{Number(item.success_requests).toLocaleString()}</td>
-                    <td style={{ padding: '12px', textAlign: 'right' }}>
-                      <span style={{ padding: '3px 8px', borderRadius: 12, fontSize: 12, fontWeight: 600, background: `${bgColor}15`, color: bgColor }}>
-                        {rate.toFixed(1)}%
-                      </span>
-                    </td>
-                    <td style={{ padding: '12px', color: '#64748b', fontSize: 13, textAlign: 'right' }}>{Number(item.avg_use_time).toFixed(2)}s</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        <ModelDetailTable data={successRates} />
       </div>
     </Spin>
+  );
+}
+
+type ModelDetailKey = 'model_name' | 'total_requests' | 'success_requests' | 'success_rate' | 'avg_use_time';
+
+function ModelDetailTable({ data }: { data: ModelSuccessRate[] }) {
+  const { sorted, state } = useSortable<ModelSuccessRate, ModelDetailKey>(
+    data,
+    (item, key) => item[key as keyof ModelSuccessRate] as any,
+  );
+
+  const headers: { key: ModelDetailKey; label: string; align: 'left' | 'right' }[] = [
+    { key: 'model_name', label: '模型', align: 'left' },
+    { key: 'total_requests', label: '总请求', align: 'right' },
+    { key: 'success_requests', label: '成功', align: 'right' },
+    { key: 'success_rate', label: '成功率', align: 'right' },
+    { key: 'avg_use_time', label: '平均耗时', align: 'right' },
+  ];
+
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <thead>
+          <tr style={{ borderBottom: '1px solid #e2e8f0' }}>
+            {headers.map((h) => (
+              <th
+                key={h.key}
+                onClick={() => state.toggle(h.key)}
+                style={{
+                  padding: '14px 12px',
+                  textAlign: h.align,
+                  color: state.sortKey === h.key ? '#6366f1' : '#64748b',
+                  fontSize: 12,
+                  cursor: 'pointer',
+                  userSelect: 'none',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {h.label}
+                <span style={{ fontSize: 10, color: state.sortKey === h.key ? '#6366f1' : '#cbd5e1' }}>
+                  {state.indicator(h.key)}
+                </span>
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.slice(0, 15).map((item, i) => {
+            const rate = Number(item.success_rate);
+            const bgColor = rate >= 90 ? '#10b981' : rate >= 50 ? '#f59e0b' : '#ef4444';
+            return (
+              <tr key={i} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                <td style={{ padding: '12px', color: '#6366f1', fontSize: 13, fontWeight: 500 }}>{item.model_name || '(空)'}</td>
+                <td style={{ padding: '12px', color: '#475569', fontSize: 13, textAlign: 'right' }}>{Number(item.total_requests).toLocaleString()}</td>
+                <td style={{ padding: '12px', color: '#475569', fontSize: 13, textAlign: 'right' }}>{Number(item.success_requests).toLocaleString()}</td>
+                <td style={{ padding: '12px', textAlign: 'right' }}>
+                  <span style={{ padding: '3px 8px', borderRadius: 12, fontSize: 12, fontWeight: 600, background: `${bgColor}15`, color: bgColor }}>
+                    {rate.toFixed(1)}%
+                  </span>
+                </td>
+                <td style={{ padding: '12px', color: '#64748b', fontSize: 13, textAlign: 'right' }}>{Number(item.avg_use_time).toFixed(2)}s</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }

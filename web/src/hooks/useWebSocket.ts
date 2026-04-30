@@ -13,14 +13,16 @@ interface UseWebSocketReturn {
   connected: boolean;
   setInterval: (interval: number) => void;
   currentInterval: number;
+  lastUpdate: number;
 }
 
 export function useWebSocket(): UseWebSocketReturn {
   const [metrics, setMetrics] = useState<RealtimeMetrics | null>(null);
   const [connected, setConnected] = useState(false);
   const [currentInterval, setCurrentInterval] = useState(loadRefreshInterval);
+  const [lastUpdate, setLastUpdate] = useState(0);
   const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const connect = () => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -46,6 +48,7 @@ export function useWebSocket(): UseWebSocketReturn {
         const msg = JSON.parse(event.data);
         if (msg.type === 'metrics') {
           setMetrics(msg.data);
+          setLastUpdate(Date.now());
         }
       } catch (e) {
         console.error('[WS] Parse error:', e);
@@ -86,5 +89,5 @@ export function useWebSocket(): UseWebSocketReturn {
     }
   };
 
-  return { metrics, connected, setInterval: sendSetInterval, currentInterval };
+  return { metrics, connected, setInterval: sendSetInterval, currentInterval, lastUpdate };
 }

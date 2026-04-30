@@ -3,6 +3,7 @@ import { Row, Col, DatePicker, Select, Card, Spin } from 'antd';
 import ReactApexChart from 'react-apexcharts';
 import dayjs, { type Dayjs } from 'dayjs';
 import { api, type TokenUsageItem } from '../api';
+import { useSortable } from '../utils/useSortable';
 
 const { RangePicker } = DatePicker;
 
@@ -135,42 +136,91 @@ export default function TokenUsage() {
       </Row>
 
       <Card title={<span style={{ color: '#1e293b', fontSize: 16, fontWeight: 600 }}>详细数据</span>} style={{ ...containerStyle, marginTop: 20 }}>
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr style={{ borderBottom: '1px solid #e2e8f0' }}>
-                {['时间', '模型', '请求数', '输入Token', '输出Token', '缓存Token', '缓存命中率', 'Quota'].map((h) => (
-                  <th key={h} style={{ padding: '16px 12px', textAlign: 'left', color: '#64748b', fontSize: 12, fontWeight: 500 }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {data.slice(0, 30).map((item, i) => {
-                const prompt = Number(item.total_prompt_tokens);
-                const cache = Number(item.total_cache_tokens || 0);
-                const hitRate = prompt > 0 ? ((cache / prompt) * 100).toFixed(1) : '0.0';
-                const bgColor = Number(hitRate) >= 30 ? '#10b98115' : Number(hitRate) >= 10 ? '#f59e0b15' : '#ef444415';
-                return (
-                  <tr key={i} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                    <td style={{ padding: '14px 12px', color: '#475569', fontSize: 13 }}>{item.time_bucket}</td>
-                    <td style={{ padding: '14px 12px', color: '#6366f1', fontSize: 13 }}>{item.model_name}</td>
-                    <td style={{ padding: '14px 12px', color: '#475569', fontSize: 13 }}>{item.request_count}</td>
-                    <td style={{ padding: '14px 12px', color: '#475569', fontSize: 13 }}>{prompt.toLocaleString()}</td>
-                    <td style={{ padding: '14px 12px', color: '#475569', fontSize: 13 }}>{Number(item.total_completion_tokens).toLocaleString()}</td>
-                    <td style={{ padding: '14px 12px', color: '#10b981', fontSize: 13 }}>{cache.toLocaleString()}</td>
-                    <td style={{ padding: '14px 12px', textAlign: 'right' }}>
-                      <span style={{ padding: '4px 10px', borderRadius: 20, fontSize: 12, fontWeight: 600, background: bgColor, color: Number(hitRate) >= 30 ? '#10b981' : Number(hitRate) >= 10 ? '#f59e0b' : '#ef4444' }}>
-                        {hitRate}%
-                      </span>
-                    </td>
-                    <td style={{ padding: '14px 12px', color: '#f59e0b', fontSize: 13 }}>{Number(item.total_quota).toLocaleString()}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        <DetailTable data={data} />
       </Card>
     </Spin>
+  );
+}
+
+type DetailKey = 'time_bucket' | 'model_name' | 'request_count' | 'total_prompt_tokens' | 'total_completion_tokens' | 'total_cache_tokens' | 'cache_hit_rate' | 'total_cost';
+
+function DetailTable({ data }: { data: TokenUsageItem[] }) {
+  const { sorted, state } = useSortable<TokenUsageItem, DetailKey>(
+    data,
+    (item, key) => {
+      if (key === 'cache_hit_rate') {
+        const p = Number(item.total_prompt_tokens);
+        const c = Number(item.total_cache_tokens || 0);
+        return p > 0 ? (c / p) * 100 : 0;
+      }
+      return item[key as keyof TokenUsageItem] as any;
+    },
+  );
+
+  const headers: { key: DetailKey; label: string; align?: 'left' | 'right' }[] = [
+    { key: 'time_bucket', label: '时间' },
+    { key: 'model_name', label: '模型' },
+    { key: 'request_count', label: '请求数' },
+    { key: 'total_prompt_tokens', label: '输入Token' },
+    { key: 'total_completion_tokens', label: '输出Token' },
+    { key: 'total_cache_tokens', label: '缓存Token' },
+    { key: 'cache_hit_rate', label: '缓存命中率', align: 'right' },
+    { key: 'total_cost', label: '金额(元)' },
+  ];
+
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <thead>
+          <tr style={{ borderBottom: '1px solid #e2e8f0' }}>
+            {headers.map((h) => (
+              <th
+                key={h.key}
+                onClick={() => state.toggle(h.key)}
+                style={{
+                  padding: '16px 12px',
+                  textAlign: h.align ?? 'left',
+                  color: state.sortKey === h.key ? '#6366f1' : '#64748b',
+                  fontSize: 12,
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                  userSelect: 'none',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {h.label}
+                <span style={{ fontSize: 10, color: state.sortKey === h.key ? '#6366f1' : '#cbd5e1' }}>
+                  {state.indicator(h.key)}
+                </span>
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.slice(0, 30).map((item, i) => {
+            const prompt = Number(item.total_prompt_tokens);
+            const cache = Number(item.total_cache_tokens || 0);
+            const hitRate = prompt > 0 ? ((cache / prompt) * 100).toFixed(1) : '0.0';
+            const bgColor = Number(hitRate) >= 30 ? '#10b98115' : Number(hitRate) >= 10 ? '#f59e0b15' : '#ef444415';
+            return (
+              <tr key={i} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                <td style={{ padding: '14px 12px', color: '#475569', fontSize: 13 }}>{item.time_bucket}</td>
+                <td style={{ padding: '14px 12px', color: '#6366f1', fontSize: 13 }}>{item.model_name}</td>
+                <td style={{ padding: '14px 12px', color: '#475569', fontSize: 13 }}>{item.request_count}</td>
+                <td style={{ padding: '14px 12px', color: '#475569', fontSize: 13 }}>{prompt.toLocaleString()}</td>
+                <td style={{ padding: '14px 12px', color: '#475569', fontSize: 13 }}>{Number(item.total_completion_tokens).toLocaleString()}</td>
+                <td style={{ padding: '14px 12px', color: '#10b981', fontSize: 13 }}>{cache.toLocaleString()}</td>
+                <td style={{ padding: '14px 12px', textAlign: 'right' }}>
+                  <span style={{ padding: '4px 10px', borderRadius: 20, fontSize: 12, fontWeight: 600, background: bgColor, color: Number(hitRate) >= 30 ? '#10b981' : Number(hitRate) >= 10 ? '#f59e0b' : '#ef4444' }}>
+                    {hitRate}%
+                  </span>
+                </td>
+                <td style={{ padding: '14px 12px', color: '#f59e0b', fontSize: 13 }}>¥ {Number(item.total_cost || 0).toFixed(4)}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }

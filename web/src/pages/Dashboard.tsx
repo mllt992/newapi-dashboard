@@ -6,7 +6,7 @@ import TrendChart from '../components/TrendChart';
 import TopModelsChart from '../components/TopModelsChart';
 import ModelHeatmap from '../components/ModelHeatmap';
 import { useWebSocket } from '../hooks/useWebSocket';
-import { api, type OverviewSummary, type TrendItem, type TopModelItem, type HeatmapCell } from '../api';
+import { api, type OverviewSummary, type TrendItem, type TopModelItem, type HeatmapCell, type TokenBreakdown } from '../api';
 import dayjs from 'dayjs';
 
 const RANGE_KEY = 'dashboard_range';
@@ -48,10 +48,11 @@ function StatBox({ label, value, sub, color }: { label: string; value: string; s
 
 export default function Dashboard() {
   const [summary, setSummary] = useState<OverviewSummary | null>(null);
-  const { metrics, connected, setInterval: setWsInterval, currentInterval } = useWebSocket();
+  const { metrics, connected, setInterval: setWsInterval, currentInterval, lastUpdate } = useWebSocket();
   const [trend, setTrend] = useState<TrendItem[]>([]);
   const [topModels, setTopModels] = useState<TopModelItem[]>([]);
   const [heatmap, setHeatmap] = useState<HeatmapCell[]>([]);
+  const [tokenBreakdown, setTokenBreakdown] = useState<TokenBreakdown | null>(null);
   const [loading, setLoading] = useState(true);
   const [rangeDays, setRangeDays] = useState(loadRange);
   const [successRate, setSuccessRate] = useState({ success: 0, failed: 0, rate: 0 });
@@ -64,12 +65,14 @@ export default function Dashboard() {
       api.getTrend(rangeDays),
       api.getTopModels({ limit: 10 }),
       api.getAvailabilityHeatmap({ start, end }),
+      api.getTokenBreakdown(),
     ])
-      .then(([s, t, top, h]) => {
+      .then(([s, t, top, h, tb]) => {
         setSummary(s);
         setTrend(t);
         setTopModels(top);
         setHeatmap(h);
+        setTokenBreakdown(tb);
         const totalSuccess = h.reduce((sum, cell) => sum + Number(cell.success_count || 0), 0);
         const totalFailed = h.reduce((sum, cell) => sum + (Number(cell.request_count) - Number(cell.success_count || 0)), 0);
         const total = totalSuccess + totalFailed;
@@ -82,9 +85,17 @@ export default function Dashboard() {
       .finally(() => setLoading(false));
   };
 
+  // 切换时间范围 → 强制刷新（带 loading）
   useEffect(() => {
+    setLoading(true);
     fetchMainData();
   }, [rangeDays]);
+
+  // 跟随 WebSocket 推送节奏静默刷新（含模型可用性热力图）
+  useEffect(() => {
+    if (lastUpdate === 0) return;
+    fetchMainData();
+  }, [lastUpdate]);
 
   const handleRangeChange = (val: number) => {
     setRangeDays(val);
@@ -100,6 +111,14 @@ export default function Dashboard() {
   const totalCost = trend.length > 0
     ? trend.reduce((s, d) => s + Number(d.total_cost || 0), 0)
     : 0;
+  const rangeTokens = trend.reduce((s, d) => s + Number(d.total_tokens || 0), 0);
+
+  const formatBig = (n: number) => {
+    if (n >= 1e9) return (n / 1e9).toFixed(2) + 'B';
+    if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+    if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+    return String(n);
+  };
 
   const successColor = successRate.rate >= 90 ? '#10b981' : successRate.rate >= 50 ? '#f59e0b' : '#ef4444';
 
@@ -114,6 +133,11 @@ export default function Dashboard() {
             <span style={{ marginLeft: 8, color: connected ? '#10b981' : '#ef4444' }}>
               {connected ? '● 实时连接' : '○ 离线'}
             </span>
+            {lastUpdate > 0 && (
+              <span style={{ marginLeft: 8, color: '#94a3b8' }}>
+                更新于 {dayjs(lastUpdate).format('HH:mm:ss')}
+              </span>
+            )}
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -139,15 +163,17 @@ export default function Dashboard() {
             prefix={<RocketOutlined style={{ color: '#fff', fontSize: 14 }} />}
             color="blue"
             trend={prevDay ? calcTrend(Number(summary?.total_requests), Number(prevDay.total_requests)) : undefined}
+            subValue={summary?.total_requests_all !== undefined ? `累计 ${formatBig(Number(summary.total_requests_all))}` : undefined}
           />
         </Col>
         <Col xs={12} sm={6}>
           <StatsCard
-            title="Token 总量"
-            value={summary?.total_tokens ?? 0}
+            title={`Token 总量 (${rangeDays}天)`}
+            value={rangeTokens}
             prefix={<ThunderboltOutlined style={{ color: '#fff', fontSize: 14 }} />}
             color="purple"
             trend={prevDay ? calcTrend(Number(summary?.total_tokens), Number(prevDay.total_tokens)) : undefined}
+            subValue={summary?.total_tokens_all !== undefined ? `累计 ${formatBig(Number(summary.total_tokens_all))}` : undefined}
           />
         </Col>
         <Col xs={12} sm={6}>
@@ -171,19 +197,43 @@ export default function Dashboard() {
 
       {/* 第二行：实时指标 */}
       <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
-        <Col xs={8} sm={4}>
-          <StatBox label="RPS" value={String(metrics?.rpm ?? 0)} sub="请求/秒" color="#6366f1" />
+        <Col xs={8} sm={3}>
+          <StatBox label="RPM" value={String(metrics?.rpm ?? 0)} sub="请求/分" color="#6366f1" />
         </Col>
-        <Col xs={8} sm={4}>
-          <StatBox label="TPS" value={metrics?.tpm ? (metrics.tpm / 1000).toFixed(1) + 'k' : '0'} sub="Token/秒" color="#8b5cf6" />
+        <Col xs={8} sm={3}>
+          <StatBox label="TPM" value={metrics?.tpm ? (metrics.tpm / 1000).toFixed(1) + 'k' : '0'} sub="Token/分" color="#8b5cf6" />
         </Col>
-        <Col xs={8} sm={4}>
+        <Col xs={8} sm={3}>
           <StatBox label="并发" value={String(metrics?.concurrent ?? 0)} sub="5分钟内" color="#ec4899" />
         </Col>
-        <Col xs={12} sm={6}>
+        <Col xs={12} sm={3}>
           <StatBox label="累计请求" value={metrics?.today_requests?.toLocaleString() ?? '0'} color="#3b82f6" />
         </Col>
-        <Col xs={12} sm={6}>
+        <Col xs={24} sm={6}>
+          <div style={{
+            background: '#fff',
+            border: '1px solid #e2e8f0',
+            borderRadius: 16,
+            padding: '10px 12px',
+            height: 100,
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'center',
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+              <span style={{ fontSize: 11, color: '#64748b' }}>累计 Token 总量</span>
+              <span style={{ fontSize: 18, fontWeight: 700, color: '#0ea5e9' }}>
+                {tokenBreakdown ? formatBig(tokenBreakdown.total_tokens) : '—'}
+              </span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6, fontSize: 10, color: '#94a3b8', lineHeight: 1.4 }}>
+              <span>输入 <span style={{ color: '#10b981' }}>{tokenBreakdown ? formatBig(tokenBreakdown.total_prompt_tokens) : '—'}</span></span>
+              <span>输出 <span style={{ color: '#f59e0b' }}>{tokenBreakdown ? formatBig(tokenBreakdown.total_completion_tokens) : '—'}</span></span>
+              <span>缓存 <span style={{ color: '#8b5cf6' }}>{tokenBreakdown ? formatBig(tokenBreakdown.total_cache_tokens) : '—'}</span></span>
+            </div>
+          </div>
+        </Col>
+        <Col xs={24} sm={6}>
           <div style={{
             background: '#fff',
             border: '1px solid #e2e8f0',

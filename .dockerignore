@@ -1,0 +1,10 @@
+**/node_modules
+**/dist
+**/.git
+**/.gitignore
+**/.vscode
+**/.idea
+**/*.log
+**/coverage
+**/.DS_Store
+env.config.json

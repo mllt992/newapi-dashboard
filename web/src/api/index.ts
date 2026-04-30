@@ -7,6 +7,9 @@ export interface OverviewSummary {
   total_tokens: number;
   total_quota: number;
   total_requests: number;
+  total_tokens_all?: number;
+  total_quota_all?: number;
+  total_requests_all?: number;
 }
 
 export interface RealtimeMetrics {
@@ -20,6 +23,7 @@ export interface RealtimeMetrics {
   tokens_5min: number;
   requests_1h: number;
   tokens_1h: number;
+  server_time?: number;
 }
 
 export interface TrendItem {
@@ -37,6 +41,7 @@ export interface TokenUsageItem {
   total_completion_tokens: number;
   total_cache_tokens: number;
   total_quota: number;
+  total_cost: number;
 }
 
 export interface TopModelItem {
@@ -70,11 +75,20 @@ export interface ModelSuccessRate {
   avg_use_time: number | string;
 }
 
+export interface TokenBreakdown {
+  total_prompt_tokens: number;
+  total_completion_tokens: number;
+  total_cache_tokens: number;
+  total_tokens: number;
+  total_requests: number;
+}
+
 export const api = {
   // 概览
   getSummary: () => http.get<{ data: OverviewSummary }>('/overview/summary').then(r => r.data.data),
   getTrend: (days = 7) => http.get<{ data: TrendItem[] }>('/overview/trend', { params: { days } }).then(r => r.data.data),
   getRealtimeMetrics: () => http.get<{ data: RealtimeMetrics }>('/overview/metrics').then(r => r.data.data),
+  getTokenBreakdown: () => http.get<{ data: TokenBreakdown }>('/overview/token-breakdown').then(r => r.data.data),
 
   // Token 用量
   getTokenUsage: (params: { start?: number; end?: number; model?: string; granularity?: string }) =>

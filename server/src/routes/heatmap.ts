@@ -16,7 +16,7 @@ router.get('/availability', async (req, res) => {
   try {
     const params = parseTimeParams(req);
     const cacheKey = `heatmap:avail:${JSON.stringify(params)}`;
-    const data = await withCache(cacheKey, 300, () => getModelAvailabilityHeatmap(params));
+    const data = await withCache(cacheKey, 15, () => getModelAvailabilityHeatmap(params));
     res.json({ success: true, data });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });

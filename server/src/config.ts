@@ -9,6 +9,7 @@ interface Config {
   REDIS_CONN_STRING: string;
   PORT: number;
   COST_RATE: number;
+  REFRESH_INTERVAL?: number;
 }
 
 const configPath = resolve(__dirname, '../../env.config.json');

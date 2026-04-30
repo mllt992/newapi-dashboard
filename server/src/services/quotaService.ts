@@ -22,9 +22,23 @@ export async function getTodaySummary() {
     [todayStart]
   );
   const data = (rows as any[])[0];
+
+  // 全时段累计 token / 请求 / 配额
+  const [allRows] = await pool.execute(
+    `SELECT
+      SUM(token_used) AS total_tokens_all,
+      SUM(quota) AS total_quota_all,
+      SUM(count) AS total_requests_all
+    FROM quota_data`
+  );
+  const allData = (allRows as any[])[0] || {};
+
   return {
     ...data,
     total_cost: Number(data.total_tokens || 0) * config.COST_RATE,
+    total_tokens_all: Number(allData.total_tokens_all || 0),
+    total_quota_all: Number(allData.total_quota_all || 0),
+    total_requests_all: Number(allData.total_requests_all || 0),
   };
 }
 
@@ -81,19 +95,21 @@ export async function getModelSummary(start?: number, end?: number) {
 
 /**
  * 获取实时指标 (RPM, TPM, 并发数等)
+ * 注意：quota_data 已按小时预聚合，created_at 为整点时间戳。
+ * 5 分钟窗口几乎总是命中 0 行，故速率改为基于最近 1 小时数据反推。
  */
 export async function getRealtimeMetrics() {
   const now = Math.floor(Date.now() / 1000);
-  const fiveMinutesAgo = now - 300;
   const oneHourAgo = now - 3600;
+  const threeHoursAgo = now - 3 * 3600;
   const todayStart = Math.floor(new Date().setHours(0, 0, 0, 0) / 1000);
 
-  // 并发数：当前小时内有请求的不同时间点数量（近似并发）
+  // 并发：最近 1 小时内活跃模型数（按小时聚合，分钟粒度无意义）
   const [concurrentRows] = await pool.execute(
-    `SELECT COUNT(DISTINCT FROM_UNIXTIME(created_at, '%Y-%m-%d %H:%i')) AS concurrent_count
+    `SELECT COUNT(DISTINCT model_name) AS concurrent_count
      FROM quota_data
-     WHERE created_at >= ? AND created_at <= ?`,
-    [fiveMinutesAgo, now]
+     WHERE created_at >= ?`,
+    [oneHourAgo]
   );
   const concurrentCount = Number(((concurrentRows as any[])[0]?.concurrent_count) || 0);
 
@@ -110,20 +126,7 @@ export async function getRealtimeMetrics() {
   const todayRequests = Number(todayData[0]?.total_requests || 0);
   const todayTokens = Number(todayData[0]?.total_tokens || 0);
 
-  // 最近5分钟
-  const [fiveMinRows] = await pool.execute(
-    `SELECT
-      SUM(count) AS total_requests,
-      SUM(token_used) AS total_tokens
-     FROM quota_data
-     WHERE created_at >= ?`,
-    [fiveMinutesAgo]
-  );
-  const fiveMinData = fiveMinRows as any[];
-  const requests5min = Number(fiveMinData[0]?.total_requests || 0);
-  const tokens5min = Number(fiveMinData[0]?.total_tokens || 0);
-
-  // 最近1小时
+  // 最近 1 小时
   const [oneHourRows] = await pool.execute(
     `SELECT
       SUM(count) AS total_requests,
@@ -136,11 +139,29 @@ export async function getRealtimeMetrics() {
   const requests1h = Number(oneHourData[0]?.total_requests || 0);
   const tokens1h = Number(oneHourData[0]?.total_tokens || 0);
 
-  // 计算速率
-  const rpm = Math.round(requests5min / 5);
-  const tpm = Math.round(tokens5min / 5);
+  // 最近 3 小时（用于在整点边界附近平滑速率）
+  const [threeHourRows] = await pool.execute(
+    `SELECT
+      SUM(count) AS total_requests,
+      SUM(token_used) AS total_tokens
+     FROM quota_data
+     WHERE created_at >= ?`,
+    [threeHoursAgo]
+  );
+  const threeHourData = threeHourRows as any[];
+  const requests3h = Number(threeHourData[0]?.total_requests || 0);
+  const tokens3h = Number(threeHourData[0]?.total_tokens || 0);
 
-  // 今日预估费用
+  // 速率：优先用 1 小时窗口，0 则回退到 3 小时均值
+  const rpsBase = requests1h > 0 ? requests1h / 3600 : requests3h / (3 * 3600);
+  const tpsBase = tokens1h > 0 ? tokens1h / 3600 : tokens3h / (3 * 3600);
+  const rpm = Math.round(rpsBase * 60);
+  const tpm = Math.round(tpsBase * 60);
+
+  // 兼容字段：requests_5min / tokens_5min 用 1 小时折算
+  const requests5min = Math.round(requests1h / 12);
+  const tokens5min = Math.round(tokens1h / 12);
+
   const todayCost = todayTokens * config.COST_RATE;
 
   return {
@@ -154,5 +175,6 @@ export async function getRealtimeMetrics() {
     tokens_5min: tokens5min,
     requests_1h: requests1h,
     tokens_1h: tokens1h,
+    server_time: now,
   };
 }
