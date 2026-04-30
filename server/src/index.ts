@@ -13,6 +13,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const app = express();
 
+// 允许被任何网站 iframe 嵌入的响应头
+app.use((_req, res, next) => {
+  res.setHeader('Content-Security-Policy', "frame-ancestors *");
+  res.setHeader('X-Frame-Options', 'ALLOWALL');
+  next();
+});
+
 app.use(cors());
 app.use(express.json());
 

@@ -1,4 +1,4 @@
-import { readFileSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -12,9 +12,29 @@ interface Config {
   REFRESH_INTERVAL?: number;
 }
 
-const configPath = resolve(__dirname, '../../env.config.json');
-const raw = readFileSync(configPath, 'utf-8');
-const config: Config = JSON.parse(raw);
+// 优先从环境变量读取，否则从配置文件读取
+function getConfig(): Config {
+  // Docker 环境变量优先
+  if (process.env.SQL_DSN || process.env.REDIS_CONN_STRING) {
+    return {
+      SQL_DSN: process.env.SQL_DSN || '',
+      REDIS_CONN_STRING: process.env.REDIS_CONN_STRING || '',
+      PORT: parseInt(process.env.PORT || '3002', 10),
+      COST_RATE: parseFloat(process.env.COST_RATE || '0.0001'),
+      REFRESH_INTERVAL: process.env.REFRESH_INTERVAL ? parseInt(process.env.REFRESH_INTERVAL, 10) : undefined,
+    };
+  }
+
+  // 回退到配置文件
+  const configPath = resolve(__dirname, '../../env.config.json');
+  if (!existsSync(configPath)) {
+    throw new Error(`配置文件不存在: ${configPath}`);
+  }
+  const raw = readFileSync(configPath, 'utf-8');
+  return JSON.parse(raw);
+}
+
+const config = getConfig();
 
 export default {
   ...config,
