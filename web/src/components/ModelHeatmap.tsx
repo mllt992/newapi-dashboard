@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { Segmented } from 'antd';
 import type { HeatmapCell } from '../api';
 
@@ -9,6 +9,11 @@ interface ModelHeatmapProps {
   onTimeRangeChange?: (range: 24 | 168) => void;
 }
 
+// 计算 UTC 小时对应的北京时间小时
+function utcToBeijingHour(utcHour: number): number {
+  return (utcHour + 8) % 24;
+}
+
 // 获取当前北京时间小时 (0-23)
 function getCurrentBeijingHour(): number {
   const now = new Date();
@@ -16,31 +21,7 @@ function getCurrentBeijingHour(): number {
   return new Date(utc + 8 * 3600000).getHours();
 }
 
-// 计算 UTC 小时对应的北京时间小时
-function utcToBeijingHour(utcHour: number): number {
-  return (utcHour + 8) % 24;
-}
-
-// 生成 x 轴标签 (北京时间)
-function generateHourLabels(count: number): string[] {
-  const currentHour = getCurrentBeijingHour();
-  const labels: string[] = [];
-
-  for (let i = count - 1; i >= 0; i--) {
-    const hour = (currentHour - i + 24) % 24;
-    if (i === 0) {
-      labels.push('现在');
-    } else {
-      labels.push(`${String(hour).padStart(2, '0')}:00`);
-    }
-  }
-
-  return labels;
-}
-
 interface CellData {
-  modelName: string;
-  beijingHour: number;
   requestCount: number;
   successCount: number;
   successRate: number;
@@ -52,6 +33,93 @@ export default function ModelHeatmap({ data, loading, timeRange = 24, onTimeRang
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  // 统一获取当前北京时间，只计算一次
+  const currentBeijingHour = useMemo(() => getCurrentBeijingHour(), [mounted, loading]);
+  const hourCount = timeRange;
+
+  // 预计算所有时间槽的北京时间
+  const timeSlots = useMemo(() => {
+    const slots: number[] = [];
+    for (let i = hourCount - 1; i >= 0; i--) {
+      // 索引 i 对应的小时：索引 0 = 最旧的小时，索引 hourCount-1 = 最近的小时
+      const slotHour = (currentBeijingHour - i + 24) % 24;
+      slots.push(slotHour);
+    }
+    return slots;
+  }, [currentBeijingHour, hourCount]);
+
+  // 预计算 x 轴标签
+  const labels = useMemo(() => {
+    return timeSlots.map((hour, i) => {
+      if (i === hourCount - 1) return '现在';
+      return `${String(hour).padStart(2, '0')}:00`;
+    });
+  }, [timeSlots, hourCount]);
+
+  // 按模型分组并统计
+  const { modelGroups, modelRequestCounts } = useMemo(() => {
+    const groups: Record<string, Map<number, CellData>> = {};
+    const counts: Record<string, number> = {};
+
+    data.forEach(item => {
+      const model = item.model_name;
+      const utcHour = Number(item.hour_of_day);
+      const beijingHour = utcToBeijingHour(utcHour);
+      const requestCount = Number(item.request_count || 0);
+      const successCount = Number(item.success_count || 0);
+
+      if (!groups[model]) {
+        groups[model] = new Map();
+      }
+
+      // 累加到对应的小时槽
+      const existing = groups[model].get(beijingHour);
+      if (existing) {
+        existing.requestCount += requestCount;
+        existing.successCount += successCount;
+        existing.successRate = existing.requestCount > 0 ? existing.successCount / existing.requestCount : 0;
+      } else {
+        groups[model].set(beijingHour, {
+          requestCount,
+          successCount,
+          successRate: requestCount > 0 ? successCount / requestCount : 0,
+        });
+      }
+
+      counts[model] = (counts[model] || 0) + requestCount;
+    });
+
+    return { modelGroups: groups, modelRequestCounts: counts };
+  }, [data]);
+
+  // 按请求数降序排序
+  const sortedModels = useMemo(() => {
+    return Object.keys(modelGroups)
+      .sort((a, b) => (modelRequestCounts[b] || 0) - (modelRequestCounts[a] || 0))
+      .slice(0, 15);
+  }, [modelGroups, modelRequestCounts]);
+
+  // 构建热力图数据
+  const heatmapData = useMemo(() => {
+    return sortedModels.map(model => {
+      const modelMap = modelGroups[model];
+
+      const cells: CellData[] = timeSlots.map(slotHour => {
+        const cell = modelMap.get(slotHour);
+        if (cell) {
+          return cell;
+        }
+        return { requestCount: 0, successCount: 0, successRate: 0 };
+      });
+
+      return {
+        model,
+        cells,
+        totalRequests: modelRequestCounts[model] || 0,
+      };
+    });
+  }, [sortedModels, modelGroups, timeSlots, modelRequestCounts]);
 
   if (!mounted || loading) {
     return (
@@ -69,95 +137,6 @@ export default function ModelHeatmap({ data, loading, timeRange = 24, onTimeRang
       </div>
     );
   }
-
-  // 按模型分组并计算统计数据
-  const modelGroups = data.reduce((acc: Record<string, CellData[]>, item) => {
-    const utcHour = Number(item.hour_of_day);
-    const beijingHour = utcToBeijingHour(utcHour);
-    const requestCount = Number(item.request_count || 0);
-    const successCount = Number(item.success_count || 0);
-    const successRate = requestCount > 0 ? successCount / requestCount : 0;
-
-    if (!acc[item.model_name]) acc[item.model_name] = [];
-    acc[item.model_name].push({
-      modelName: item.model_name,
-      beijingHour,
-      requestCount,
-      successCount,
-      successRate,
-    });
-    return acc;
-  }, {});
-
-  // 计算每个模型的总请求数，用于排序
-  const modelRequestCounts: Record<string, number> = {};
-  Object.entries(modelGroups).forEach(([model, cells]) => {
-    modelRequestCounts[model] = cells.reduce((sum, c) => sum + c.requestCount, 0);
-  });
-
-  // 按使用频率（总请求数）降序排序
-  const sortedModelNames = Object.keys(modelGroups)
-    .sort((a, b) => (modelRequestCounts[b] || 0) - (modelRequestCounts[a] || 0))
-    .slice(0, 15);
-
-  // 生成时间轴数据
-  const hourCount = timeRange;
-  const labels = generateHourLabels(hourCount);
-
-  // 构建热力图矩阵
-  const matrix: Map<string, Map<number, CellData>> = new Map();
-  sortedModelNames.forEach(model => {
-    const modelMap = new Map<number, CellData>();
-    for (let i = 0; i < hourCount; i++) {
-      // 计算每个位置对应的北京时间
-      const currentBeijingHour = getCurrentBeijingHour();
-      const beijingHour = (currentBeijingHour - (hourCount - 1 - i) + 24) % 24;
-      modelMap.set(beijingHour, {
-        modelName: model,
-        beijingHour,
-        requestCount: 0,
-        successCount: 0,
-        successRate: 0,
-      });
-    }
-    matrix.set(model, modelMap);
-  });
-
-  // 填充数据
-  sortedModelNames.forEach(model => {
-    const cells = modelGroups[model];
-    const modelMap = matrix.get(model)!;
-
-    cells.forEach(cell => {
-      const currentBeijingHour = getCurrentBeijingHour();
-      const hoursAgo = (currentBeijingHour - cell.beijingHour + 24) % 24;
-
-      if (hoursAgo < hourCount) {
-        const index = (hourCount - 1 - hoursAgo + 24) % 24;
-        const existing = modelMap.get(cell.beijingHour);
-        if (existing && hoursAgo <= 23) {
-          // 更新现有数据
-          existing.requestCount += cell.requestCount;
-          existing.successCount += cell.successCount;
-          existing.successRate = existing.requestCount > 0 ? existing.successCount / existing.requestCount : 0;
-        }
-      }
-    });
-  });
-
-  // 转换矩阵为数组格式便于渲染
-  const heatmapData = sortedModelNames.map(model => {
-    const modelMap = matrix.get(model)!;
-    const hours: CellData[] = [];
-
-    for (let i = 0; i < hourCount; i++) {
-      const currentBeijingHour = getCurrentBeijingHour();
-      const beijingHour = (currentBeijingHour - (hourCount - 1 - i) + 24) % 24;
-      hours.push(modelMap.get(beijingHour)!);
-    }
-
-    return { model, hours, totalRequests: modelRequestCounts[model] || 0 };
-  });
 
   const cellSize = 32;
   const cellGap = 4;
@@ -210,7 +189,7 @@ export default function ModelHeatmap({ data, loading, timeRange = 24, onTimeRang
 
       {/* 热力图主体 */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: cellGap }}>
-        {heatmapData.map(({ model, hours, totalRequests }) => (
+        {heatmapData.map(({ model, cells, totalRequests }) => (
           <div key={model} style={{ display: 'flex', alignItems: 'center' }}>
             {/* 模型名称 */}
             <div
@@ -230,11 +209,9 @@ export default function ModelHeatmap({ data, loading, timeRange = 24, onTimeRang
 
             {/* 格子 */}
             <div style={{ display: 'flex', gap: cellGap }}>
-              {hours.map((cell, i) => {
+              {cells.map((cell, i) => {
                 const rate = cell.successRate;
                 const hasData = cell.requestCount > 0;
-
-                // 成功和失败的宽度百分比
                 const successWidth = rate * 100;
                 const failWidth = (1 - rate) * 100;
 
@@ -268,7 +245,6 @@ export default function ModelHeatmap({ data, loading, timeRange = 24, onTimeRang
                   >
                     {hasData ? (
                       <>
-                        {/* 成功部分 - 绿色 */}
                         <div
                           style={{
                             width: `${successWidth}%`,
@@ -277,7 +253,6 @@ export default function ModelHeatmap({ data, loading, timeRange = 24, onTimeRang
                             transition: 'width 0.3s',
                           }}
                         />
-                        {/* 失败部分 - 红色 */}
                         <div
                           style={{
                             width: `${failWidth}%`,
@@ -300,7 +275,7 @@ export default function ModelHeatmap({ data, loading, timeRange = 24, onTimeRang
 
       {/* 统计信息 */}
       <div style={{ marginTop: 16, display: 'flex', gap: 16, fontSize: 11, color: '#64748b' }}>
-        <span>显示 {sortedModelNames.length} 个模型</span>
+        <span>显示 {sortedModels.length} 个模型</span>
         <span>总请求: {Object.values(modelRequestCounts).reduce((a, b) => a + b, 0).toLocaleString()}</span>
       </div>
     </div>
