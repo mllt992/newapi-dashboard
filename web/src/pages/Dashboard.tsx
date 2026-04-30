@@ -269,14 +269,7 @@ export default function Dashboard() {
       {/* 模型可用性热力图 */}
       <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
         <Col span={24}>
-          <div style={{
-            background: '#f8fafc',
-            border: '1px solid #e2e8f0',
-            borderRadius: 16,
-            padding: 20,
-          }}>
-            <ModelHeatmap data={heatmap} loading={loading} timeRange={heatmapRange} onTimeRangeChange={setHeatmapRange} />
-          </div>
+          <ModelHeatmap data={heatmap} loading={loading} timeRange={heatmapRange} onTimeRangeChange={setHeatmapRange} />
         </Col>
       </Row>
 

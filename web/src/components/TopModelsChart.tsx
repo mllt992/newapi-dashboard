@@ -88,26 +88,22 @@ export default function TopModelsChart({ data, loading }: TopModelsChartProps) {
   return (
     <div
       style={{
-        padding: 24,
-        borderRadius: 20,
+        padding: 20,
+        borderRadius: 16,
         background: '#f8fafc',
         border: '1px solid #e2e8f0',
         height: '100%',
+        boxSizing: 'border-box',
       }}
     >
-      <div style={{ marginBottom: 20 }}>
-        <h3 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: '#1e293b' }}>
-          Top 5 模型消耗
-        </h3>
-        <p style={{ margin: '8px 0 0', fontSize: 13, color: '#64748b' }}>
-          Quota消耗排行
-        </p>
-      </div>
+      <h3 style={{ margin: '0 0 12px', fontSize: 14, fontWeight: 600, color: '#1e293b' }}>
+        Top 5 模型消耗
+      </h3>
       <ReactApexChart
         type="bar"
         series={series}
         options={options}
-        height={320}
+        height={260}
       />
     </div>
   );
