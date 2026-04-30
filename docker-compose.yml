@@ -17,7 +17,7 @@ services:
     depends_on:
       - redis
     ports:
-      - "${APP_PORT:-3002}:3002"
+      - "${APP_PORT:-16302}:3002"
     environment:
       - SQL_DSN=${SQL_DSN}
       - REDIS_CONN_STRING=redis://default:${REDIS_PASSWORD:-123456}@redis:${REDIS_PORT:-6379}
