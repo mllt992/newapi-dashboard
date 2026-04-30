@@ -1,34 +1,32 @@
 import { useEffect, useState } from 'react';
+import { Segmented } from 'antd';
 import ReactApexChart from 'react-apexcharts';
 import type { HeatmapCell } from '../api';
 
 interface ModelHeatmapProps {
   data: HeatmapCell[];
   loading?: boolean;
+  timeRange?: 24 | 168;
+  onTimeRangeChange?: (range: 24 | 168) => void;
 }
 
-// 计算成功率并映射到颜色值 (0-100 映射到 红-黄-绿)
+// 计算成功率并映射到颜色值
 function getHeatmapValue(cell: HeatmapCell | undefined): number {
   if (!cell || cell.request_count === 0) return 0;
   const rate = Number(cell.success_count) / Number(cell.request_count);
   return Math.round(rate * 100);
 }
 
-// 获取中国时区的当前小时
-function getCurrentChinaHour(): number {
+// 获取当前北京时间小时 (0-23)
+function getCurrentBeijingHour(): number {
   const now = new Date();
   const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
   return new Date(utc + 8 * 3600000).getHours();
 }
 
-// 获取 UTC 时区的当前小时
-function getCurrentUtcHour(): number {
-  return new Date().getUTCHours(); // 使用 UTC 小时，与数据库 HOUR() 函数返回的 UTC 值一致
-}
-
-// 生成最近 24 小时的 x 轴标签
-function generate24HourLabels(): string[] {
-  const currentHour = getCurrentChinaHour();
+// 生成 x 轴标签 (北京时间)
+function generateHourLabels(): string[] {
+  const currentHour = getCurrentBeijingHour();
   const labels: string[] = [];
 
   for (let i = 23; i >= 0; i--) {
@@ -43,14 +41,19 @@ function generate24HourLabels(): string[] {
   return labels;
 }
 
-export default function ModelHeatmap({ data, loading }: ModelHeatmapProps) {
+// 计算 UTC 小时对应的北京时间小时
+function utcToBeijingHour(utcHour: number): number {
+  return (utcHour + 8) % 24;
+}
+
+export default function ModelHeatmap({ data, loading, timeRange = 24, onTimeRangeChange }: ModelHeatmapProps) {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
-  if (!mounted || loading || !data.length) {
+  if (!mounted || loading) {
     return (
       <div style={{
         height: 300,
@@ -67,48 +70,54 @@ export default function ModelHeatmap({ data, loading }: ModelHeatmapProps) {
     );
   }
 
-  // 按模型分组并排序（按模型名称字母顺序）
+  // 按模型分组
   const modelGroups = data.reduce((acc: Record<string, HeatmapCell[]>, item) => {
     if (!acc[item.model_name]) acc[item.model_name] = [];
     acc[item.model_name].push(item);
     return acc;
   }, {});
 
-  // 提取模型名称并按字母顺序排序
-  const sortedModelNames = Object.keys(modelGroups).sort((a, b) => a.localeCompare(b));
+  // 计算每个模型的总请求数，用于排序
+  const modelRequestCounts: Record<string, number> = {};
+  Object.entries(modelGroups).forEach(([model, cells]) => {
+    modelRequestCounts[model] = cells.reduce((sum, c) => sum + Number(c.request_count || 0), 0);
+  });
 
-  // 当前中国小时
-  const currentChinaHour = getCurrentChinaHour();
-  // 当前 UTC 小时
-  const currentUtcHour = getCurrentUtcHour();
+  // 按使用频率（总请求数）降序排序
+  const sortedModelNames = Object.keys(modelGroups)
+    .sort((a, b) => (modelRequestCounts[b] || 0) - (modelRequestCounts[a] || 0));
+
+  const labels = generateHourLabels();
 
   const series = sortedModelNames.slice(0, 15).map((model) => {
-    const hours: number[] = new Array(24).fill(-1);
+    // 创建时间轴数组，索引0=23小时前，索引23=现在
+    const hours: number[] = new Array(timeRange).fill(-1);
     const cells = modelGroups[model];
 
     cells.forEach(c => {
-      // 数据库返回的是 UTC 小时
       const utcHour = Number(c.hour_of_day);
+      const beijingHour = utcToBeijingHour(utcHour);
 
-      // 计算 UTC 小时的"小时差"：当前 UTC 小时与数据 UTC 小时的差
-      // 例如：当前 UTC 3:00，数据 UTC 4:00 → 差异 -1，即数据是"1小时前"
-      // 公式：(current - data + 24) % 24 得到"数据是几小时前"
-      const hoursAgo = (currentUtcHour - utcHour + 24) % 24;
+      // 获取当前北京时间
+      const currentBeijingHour = getCurrentBeijingHour();
 
-      // 将"几小时前"转换为数组索引
-      // 索引 0 = 23小时前, 23 = 现在
-      // hoursAgo = 0 → 索引 23 (现在)
-      // hoursAgo = 1 → 索引 22 (1小时前)
-      // hoursAgo = 23 → 索引 0 (23小时前)
-      const index = 23 - hoursAgo;
+      // 计算数据对应的小时在当前时间轴中的索引位置
+      // 公式：(currentBeijingHour - beijingHour + 24) % timeRange 得到"数据是几小时前"
+      const hoursAgo = (currentBeijingHour - beijingHour + 24) % 24;
 
-      hours[index] = getHeatmapValue(c);
+      // 只处理24小时范围内的数据
+      if (hoursAgo < timeRange) {
+        // 索引 = timeRange - 1 - hoursAgo，范围是 0 到 timeRange-1
+        const index = timeRange - 1 - hoursAgo;
+        hours[index] = getHeatmapValue(c);
+      }
     });
 
     return { name: model.length > 18 ? model.substring(0, 18) + '...' : model, data: hours };
   });
 
-  const labels = generate24HourLabels();
+  // 只取前24个标签显示（当选择7天时）
+  const displayLabels = timeRange === 168 ? labels.slice(-24) : labels;
 
   const options: ApexCharts.ApexOptions = {
     chart: {
@@ -140,7 +149,7 @@ export default function ModelHeatmap({ data, loading }: ModelHeatmapProps) {
       },
     },
     xaxis: {
-      categories: labels,
+      categories: displayLabels,
       labels: { style: { colors: '#64748b', fontSize: '10px' } },
       axisBorder: { color: '#e2e8f0' },
     },
@@ -158,12 +167,13 @@ export default function ModelHeatmap({ data, loading }: ModelHeatmapProps) {
           </div>`;
         }
 
-        // 根据索引计算对应的 UTC 小时
-        const hoursAgo = 23 - dataPointIndex;
-        const utcHour = (currentUtcHour - hoursAgo + 24) % 24;
-        const chinaHour = (utcHour + 8) % 24;
+        // 计算对应的北京时间
+        const currentBeijingHour = getCurrentBeijingHour();
+        const hoursAgo = (timeRange - 1) - dataPointIndex;
+        const dataBeijingHour = (currentBeijingHour - hoursAgo + 24) % 24;
 
         // 在原始数据中查找
+        const utcHour = (dataBeijingHour - 8 + 24) % 24;
         const cell = data.find(c => c.model_name === model && Number(c.hour_of_day) === utcHour);
 
         if (!cell) {
@@ -178,8 +188,7 @@ export default function ModelHeatmap({ data, loading }: ModelHeatmapProps) {
 
         return `<div style="padding:12px;background:#fff;border-radius:8px;min-width:180px">
           <div style="font-weight:600;color:#1e293b;margin-bottom:8px;font-size:13px">${model}</div>
-          <div style="color:#64748b;font-size:12px">时间: <b>${hourLabel}</b></div>
-          <div style="color:#64748b;font-size:12px">UTC: <b>${String(utcHour).padStart(2, '0')}:00</b> / 中国: <b>${String(chinaHour).padStart(2, '0')}:00</b></div>
+          <div style="color:#64748b;font-size:12px">北京时间: <b>${hourLabel}</b></div>
           <div style="color:#64748b;font-size:12px">总请求: <b>${reqCount}</b></div>
           <div style="color:#64748b;font-size:12px">成功: <b style="color:#10b981">${successCount}</b></div>
           <div style="color:#64748b;font-size:12px">失败: <b style="color:#ef4444">${reqCount - successCount}</b></div>
@@ -197,14 +206,27 @@ export default function ModelHeatmap({ data, loading }: ModelHeatmapProps) {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
         <div>
           <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: '#1e293b' }}>模型可用性</h3>
-          <p style={{ margin: '4px 0 0', fontSize: 12, color: '#64748b' }}>最近24小时 · 颜色表示成功率</p>
+          <p style={{ margin: '4px 0 0', fontSize: 12, color: '#64748b' }}>
+            北京时间 · 颜色表示成功率
+          </p>
         </div>
-        <div style={{ display: 'flex', gap: 12, fontSize: 12, alignItems: 'center' }}>
-          <span style={{ color: '#22c55e' }}>● 成功多</span>
-          <span style={{ color: '#84cc16' }}>● 较好</span>
-          <span style={{ color: '#f59e0b' }}>● 一般</span>
-          <span style={{ color: '#ef4444' }}>● 失败多</span>
-          <span style={{ color: '#cbd5e1' }}>● 无数据</span>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <Segmented
+            value={timeRange}
+            onChange={(v) => onTimeRangeChange?.(v as 24 | 168)}
+            options={[
+              { label: '24小时', value: 24 },
+              { label: '7天', value: 168 },
+            ]}
+            size="small"
+          />
+          <div style={{ display: 'flex', gap: 8, fontSize: 11, marginLeft: 8 }}>
+            <span style={{ color: '#22c55e' }}>● 成功多</span>
+            <span style={{ color: '#84cc16' }}>● 较好</span>
+            <span style={{ color: '#f59e0b' }}>● 一般</span>
+            <span style={{ color: '#ef4444' }}>● 失败多</span>
+            <span style={{ color: '#cbd5e1' }}>● 无数据</span>
+          </div>
         </div>
       </div>
       <ReactApexChart

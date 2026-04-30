@@ -52,6 +52,7 @@ export default function Dashboard() {
   const [trend, setTrend] = useState<TrendItem[]>([]);
   const [topModels, setTopModels] = useState<TopModelItem[]>([]);
   const [heatmap, setHeatmap] = useState<HeatmapCell[]>([]);
+  const [heatmapRange, setHeatmapRange] = useState<24 | 168>(24);
   const [tokenBreakdown, setTokenBreakdown] = useState<TokenBreakdown | null>(null);
   const [loading, setLoading] = useState(true);
   const [rangeDays, setRangeDays] = useState(loadRange);
@@ -60,9 +61,10 @@ export default function Dashboard() {
   const fetchMainData = () => {
     const end = dayjs().endOf('day').unix();
     const start = dayjs().subtract(rangeDays, 'day').startOf('day').unix();
-    // 热力图固定查询最近 24 小时数据，确保实时更新
+    // 热力图根据选择的时间范围查询
     const heatmapEnd = dayjs().unix();
-    const heatmapStart = dayjs().subtract(1, 'day').unix();
+    const heatmapHours = heatmapRange;
+    const heatmapStart = dayjs().subtract(heatmapHours, 'hour').unix();
     Promise.all([
       api.getSummary(),
       api.getTrend(rangeDays),
@@ -93,6 +95,11 @@ export default function Dashboard() {
     setLoading(true);
     fetchMainData();
   }, [rangeDays]);
+
+  // 切换热力图时间范围 → 静默刷新
+  useEffect(() => {
+    fetchMainData();
+  }, [heatmapRange]);
 
   // 跟随 WebSocket 推送节奏静默刷新（含模型可用性热力图）
   useEffect(() => {
@@ -268,7 +275,7 @@ export default function Dashboard() {
             borderRadius: 16,
             padding: 20,
           }}>
-            <ModelHeatmap data={heatmap} loading={loading} />
+            <ModelHeatmap data={heatmap} loading={loading} timeRange={heatmapRange} onTimeRangeChange={setHeatmapRange} />
           </div>
         </Col>
       </Row>
