@@ -9,7 +9,7 @@ interface ModelHeatmapProps {
   onTimeRangeChange?: (range: 24 | 168) => void;
 }
 
-// 计算 UTC 小时对应的北京时间小时
+// 计算 UTC 小时对应的北京时间小时（保留但前端不再使用，由后端直接返回北京时间）
 function utcToBeijingHour(utcHour: number): number {
   return (utcHour + 8) % 24;
 }
@@ -57,15 +57,15 @@ export default function ModelHeatmap({ data, loading, timeRange = 24, onTimeRang
     });
   }, [timeSlots, hourCount]);
 
-  // 按模型分组并统计
+  // 按模型分组并统计（数据库已返回北京时间小时，前端直接使用）
   const { modelGroups, modelRequestCounts } = useMemo(() => {
     const groups: Record<string, Map<number, CellData>> = {};
     const counts: Record<string, number> = {};
 
     data.forEach(item => {
       const model = item.model_name;
-      const utcHour = Number(item.hour_of_day);
-      const beijingHour = utcToBeijingHour(utcHour);
+      // 后端已返回北京时间小时，直接使用
+      const beijingHour = Number(item.hour_of_day);
       const requestCount = Number(item.request_count || 0);
       const successCount = Number(item.success_count || 0);
 

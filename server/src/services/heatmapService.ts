@@ -19,7 +19,7 @@ export async function getModelAvailabilityHeatmap(params: HeatmapParams) {
   let sql = `
     SELECT
       model_name,
-      HOUR(FROM_UNIXTIME(created_at)) AS hour_of_day,
+      HOUR(DATE_ADD(FROM_UNIXTIME(created_at), INTERVAL 8 HOUR)) AS hour_of_day,
       COUNT(*) AS request_count,
       SUM(CASE WHEN type = 2 THEN 1 ELSE 0 END) AS success_count,
       AVG(use_time) AS avg_use_time
