@@ -16,15 +16,18 @@ interface HeatmapParams {
 export async function getModelAvailabilityHeatmap(params: HeatmapParams) {
   const { start, end, models } = params;
 
+  // hour_bucket = FLOOR(unix_ts / 3600) 为 UTC 整点桶，时区无关；
+  // 前端用 (currentBucket - cellBucket) 直接定位 slot，可正确跨日。
+  // type=2 成功消费, type=5 错误请求（500/400 等），两者合计为"请求总数"。
   let sql = `
     SELECT
       model_name,
-      HOUR(CONVERT_TZ(FROM_UNIXTIME(created_at), '+00:00', '+08:00')) AS hour_of_day,
+      FLOOR(created_at / 3600) AS hour_bucket,
       COUNT(*) AS request_count,
       SUM(CASE WHEN type = 2 THEN 1 ELSE 0 END) AS success_count,
       AVG(use_time) AS avg_use_time
     FROM logs
-    WHERE type = 2
+    WHERE type IN (2, 5)
   `;
   const args: any[] = [];
 
@@ -35,7 +38,7 @@ export async function getModelAvailabilityHeatmap(params: HeatmapParams) {
     args.push(...models);
   }
 
-  sql += ' GROUP BY model_name, hour_of_day ORDER BY model_name, hour_of_day';
+  sql += ' GROUP BY model_name, hour_bucket ORDER BY model_name, hour_bucket';
 
   const [rows] = await pool.execute(sql, args);
   return rows;
@@ -73,6 +76,7 @@ export async function getUsagePatternHeatmap(params: HeatmapParams) {
 export async function getModelSuccessRate(params: HeatmapParams) {
   const { start, end } = params;
 
+  // type=2 成功, type=5 错误；两者合计为请求总数
   let sql = `
     SELECT
       model_name,
@@ -81,7 +85,7 @@ export async function getModelSuccessRate(params: HeatmapParams) {
       ROUND(SUM(CASE WHEN type = 2 THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2) AS success_rate,
       AVG(use_time) AS avg_use_time
     FROM logs
-    WHERE 1=1
+    WHERE type IN (2, 5)
   `;
   const args: any[] = [];
 

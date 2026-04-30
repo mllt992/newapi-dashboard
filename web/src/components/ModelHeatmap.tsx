@@ -20,12 +20,8 @@ interface HeatmapRow {
   totalRequests: number;
 }
 
-// 获取当前北京时间
-function getCurrentBeijingTime(): Date {
-  const now = new Date();
-  const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
-  return new Date(utc + 8 * 3600000);
-}
+// 北京时区偏移（小时）
+const BEIJING_TZ_OFFSET = 8;
 
 export default function ModelHeatmap({
   data,
@@ -40,36 +36,39 @@ export default function ModelHeatmap({
     setMounted(true);
   }, []);
 
-  const hourCount = timeRange;
-  const now = getCurrentBeijingTime();
-  const currentHour = now.getHours();
+  // 7D 模式：21 格 × 8h；24H 模式：24 格 × 1h
+  const hoursPerSlot = timeRange === 168 ? 8 : 1;
+  const slotCount = timeRange / hoursPerSlot;
 
-  // 生成时间轴标签
+  // 当前时刻所在的 UTC 整点桶（与后端 FLOOR(created_at/3600) 同源）
+  const currentBucket = Math.floor(Date.now() / 1000 / 3600);
+
+  // 生成时间轴标签（按北京时区显示）
   const labels = useMemo(() => {
     const result: string[] = [];
-    for (let i = 0; i < hourCount; i++) {
-      const hoursAgo = hourCount - 1 - i;
-      if (hoursAgo === 0) {
+    for (let i = 0; i < slotCount; i++) {
+      const slotsAgo = slotCount - 1 - i;
+      if (slotsAgo === 0) {
         result.push('现在');
       } else {
-        const hour = (currentHour - hoursAgo + 24) % 24;
-        result.push(`${String(hour).padStart(2, '0')}`);
+        // 该 slot 起始桶对应的北京时
+        const bucketStart = currentBucket - slotsAgo * hoursPerSlot;
+        const beijingHour = (bucketStart + BEIJING_TZ_OFFSET) % 24;
+        const normalizedHour = (beijingHour + 24) % 24;
+        result.push(String(normalizedHour).padStart(2, '0'));
       }
     }
     return result;
-  }, [hourCount, currentHour]);
+  }, [slotCount, hoursPerSlot, currentBucket]);
 
-  // 处理数据
+  // 处理数据：按 hour_bucket 直接映射 slot
   const heatmapData = useMemo(() => {
-    const now = getCurrentBeijingTime();
-    const currentHour = now.getHours();
-
     const modelMap: Record<string, Map<number, ProcessedCell>> = {};
     const modelTotals: Record<string, number> = {};
 
     data.forEach(item => {
       const model = item.model_name;
-      const beijingHour = Number(item.hour_of_day);
+      const bucket = Number(item.hour_bucket);
       const requestCount = Number(item.request_count || 0);
       const successCount = Number(item.success_count || 0);
       const failCount = requestCount - successCount;
@@ -79,10 +78,13 @@ export default function ModelHeatmap({
         modelTotals[model] = 0;
       }
 
-      const hoursAgo = (currentHour - beijingHour + 24) % 24;
-      const slotIndex = hourCount - 1 - hoursAgo;
+      // 与"现在"桶相差多少个 slot（按 hoursPerSlot 聚合）
+      const bucketsAgo = currentBucket - bucket;
+      if (bucketsAgo < 0) return; // 跳过未来数据
+      const slotsAgo = Math.floor(bucketsAgo / hoursPerSlot);
+      const slotIndex = slotCount - 1 - slotsAgo;
 
-      if (slotIndex >= 0 && slotIndex < hourCount) {
+      if (slotIndex >= 0 && slotIndex < slotCount) {
         const existing = modelMap[model].get(slotIndex);
         if (existing) {
           existing.successCount += successCount;
@@ -97,7 +99,7 @@ export default function ModelHeatmap({
     const rows: HeatmapRow[] = Object.keys(modelMap)
       .map(model => {
         const cells: ProcessedCell[] = [];
-        for (let i = 0; i < hourCount; i++) {
+        for (let i = 0; i < slotCount; i++) {
           const cell = modelMap[model].get(i);
           cells.push(cell || { successCount: 0, failCount: 0 });
         }
@@ -108,7 +110,19 @@ export default function ModelHeatmap({
       .slice(0, 10);
 
     return rows;
-  }, [data, hourCount]);
+  }, [data, slotCount, hoursPerSlot, currentBucket]);
+
+  // 全局最大请求量，用于点数 sqrt 缩放（避免单格过亮其他格不可见）
+  const globalMaxTotal = useMemo(() => {
+    let max = 0;
+    for (const row of heatmapData) {
+      for (const cell of row.cells) {
+        const t = cell.successCount + cell.failCount;
+        if (t > max) max = t;
+      }
+    }
+    return max;
+  }, [heatmapData]);
 
   if (!mounted || loading) {
     return (
@@ -181,7 +195,7 @@ export default function ModelHeatmap({
         ref={containerRef}
         style={{
           display: 'grid',
-          gridTemplateColumns: `minmax(80px, auto) repeat(${hourCount}, 1fr)`,
+          gridTemplateColumns: `minmax(80px, auto) repeat(${slotCount}, 1fr)`,
           gap: 2,
           width: '100%',
         }}
@@ -225,11 +239,33 @@ export default function ModelHeatmap({
               </div>
             </Tooltip>
 
-            {/* 格子 */}
+            {/* 格子：点阵显示——绿点=成功，红点=失败，点数反映请求量 */}
             {row.cells.map((cell, i) => {
               const total = cell.successCount + cell.failCount;
               const hasData = total > 0;
-              const successWidth = hasData ? (cell.successCount / total * 100) : 0;
+
+              // 点数：sqrt 缩放到 [1, MAX_DOTS]
+              const MAX_DOTS = 16;
+              let totalDots = 0;
+              let greenDots = 0;
+              let redDots = 0;
+              if (hasData && globalMaxTotal > 0) {
+                totalDots = Math.max(
+                  1,
+                  Math.round(Math.sqrt(total / globalMaxTotal) * MAX_DOTS)
+                );
+                greenDots = Math.round(totalDots * cell.successCount / total);
+                redDots = totalDots - greenDots;
+                // 有失败但被四舍五入吞掉时，保留至少 1 个红点
+                if (cell.failCount > 0 && redDots === 0) {
+                  redDots = 1;
+                  greenDots = Math.max(0, totalDots - 1);
+                }
+                if (cell.successCount > 0 && greenDots === 0) {
+                  greenDots = 1;
+                  redDots = Math.max(0, totalDots - 1);
+                }
+              }
 
               return (
                 <Tooltip
@@ -250,42 +286,44 @@ export default function ModelHeatmap({
                 >
                   <div
                     style={{
-                      height: '100%',
-                      minHeight: 24,
+                      minHeight: 28,
                       borderRadius: 3,
-                      overflow: 'hidden',
-                      display: 'flex',
                       cursor: 'pointer',
-                      background: hasData ? '#f1f5f9' : 'transparent',
+                      background: hasData ? '#f8fafc' : 'transparent',
+                      border: hasData ? 'none' : '1px dashed #e2e8f0',
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      alignContent: 'center',
+                      justifyContent: 'center',
+                      gap: 1,
+                      padding: 2,
+                      boxSizing: 'border-box',
                     }}
                   >
-                    {hasData ? (
-                      <>
-                        <div
-                          style={{
-                            width: `${successWidth}%`,
-                            height: '100%',
-                            background: 'linear-gradient(180deg, #22c55e 0%, #16a34a 100%)',
-                          }}
-                        />
-                        <div
-                          style={{
-                            width: `${100 - successWidth}%`,
-                            height: '100%',
-                            background: 'linear-gradient(180deg, #f87171 0%, #dc2626 100%)',
-                          }}
-                        />
-                      </>
-                    ) : (
-                      <div
+                    {hasData && Array.from({ length: greenDots }).map((_, k) => (
+                      <span
+                        key={`g${k}`}
                         style={{
-                          width: '100%',
-                          height: '100%',
-                          border: '1px dashed #e2e8f0',
-                          borderRadius: 3,
+                          width: 4,
+                          height: 4,
+                          borderRadius: '50%',
+                          background: '#22c55e',
+                          flex: '0 0 auto',
                         }}
                       />
-                    )}
+                    ))}
+                    {hasData && Array.from({ length: redDots }).map((_, k) => (
+                      <span
+                        key={`r${k}`}
+                        style={{
+                          width: 4,
+                          height: 4,
+                          borderRadius: '50%',
+                          background: '#ef4444',
+                          flex: '0 0 auto',
+                        }}
+                      />
+                    ))}
                   </div>
                 </Tooltip>
               );
@@ -305,8 +343,9 @@ export default function ModelHeatmap({
         fontSize: 10,
         color: '#64748b',
       }}>
-        <span><span style={{ color: '#22c55e' }}>■</span> 成功</span>
-        <span><span style={{ color: '#ef4444' }}>■</span> 失败</span>
+        <span><span style={{ color: '#22c55e' }}>●</span> 成功</span>
+        <span><span style={{ color: '#ef4444' }}>●</span> 失败</span>
+        <span style={{ color: '#94a3b8' }}>点数 ∝ 请求量</span>
         <span style={{ border: '1px dashed #e2e8f0', padding: '0 4px', borderRadius: 2 }}>无数据</span>
       </div>
     </div>

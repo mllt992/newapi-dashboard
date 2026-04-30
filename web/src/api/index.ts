@@ -55,7 +55,7 @@ export interface TopModelItem {
 
 export interface HeatmapCell {
   model_name: string;
-  hour_of_day: number;
+  hour_bucket: number;
   request_count: number;
   success_count: number | string;
   avg_use_time: number | string;
