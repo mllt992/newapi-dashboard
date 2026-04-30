@@ -60,11 +60,14 @@ export default function Dashboard() {
   const fetchMainData = () => {
     const end = dayjs().endOf('day').unix();
     const start = dayjs().subtract(rangeDays, 'day').startOf('day').unix();
+    // 热力图固定查询最近 24 小时数据，确保实时更新
+    const heatmapEnd = dayjs().unix();
+    const heatmapStart = dayjs().subtract(1, 'day').unix();
     Promise.all([
       api.getSummary(),
       api.getTrend(rangeDays),
       api.getTopModels({ limit: 10 }),
-      api.getAvailabilityHeatmap({ start, end }),
+      api.getAvailabilityHeatmap({ start: heatmapStart, end: heatmapEnd }),
       api.getTokenBreakdown(),
     ])
       .then(([s, t, top, h, tb]) => {

@@ -48,7 +48,6 @@ export default function TopModelsChart({ data, loading }: TopModelsChartProps) {
       toolbar: { show: false },
       animations: {
         enabled: true,
-        easing: 'easeinout',
         speed: 1000,
       },
     },
@@ -71,18 +70,18 @@ export default function TopModelsChart({ data, loading }: TopModelsChartProps) {
     xaxis: {
       categories: top5.map((d) => d.model_name.length > 20 ? d.model_name.substring(0, 20) + '...' : d.model_name),
       labels: {
-        style: { colors: '#64748b', fontSize: 11 },
+        style: { colors: '#64748b', fontSize: '11px' },
         formatter: (val) => Number(val).toLocaleString(),
       },
       axisBorder: { color: '#e2e8f0' },
     },
     yaxis: {
       labels: {
-        style: { colors: '#1e293b', fontSize: 11 },
+        style: { colors: '#1e293b', fontSize: '11px' },
       },
     },
     tooltip: {
-      style: { fontSize: 12 },
+      style: { fontSize: '12px' },
     },
   };
 

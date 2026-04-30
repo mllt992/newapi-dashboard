@@ -59,7 +59,6 @@ export default function TrendChart({ data, loading, height = 300 }: TrendChartPr
       sparkline: { enabled: false },
       animations: {
         enabled: true,
-        easing: 'easeinout',
         speed: 1000,
         animateGradually: { enabled: true, delay: 150 },
       },
@@ -69,8 +68,8 @@ export default function TrendChart({ data, loading, height = 300 }: TrendChartPr
       type: 'gradient',
       gradient: {
         shadeIntensity: 1,
-        opacityFrom: { val: 0.35, op: 'rgba' },
-        opacityTo: { val: 0.08, op: 'rgba' },
+        opacityFrom: 0.35,
+        opacityTo: 0.08,
         stops: [0, 90, 100],
       },
     },
@@ -82,7 +81,7 @@ export default function TrendChart({ data, loading, height = 300 }: TrendChartPr
     xaxis: {
       type: 'datetime',
       labels: {
-        style: { colors: '#64748b', fontSize: 12 },
+        style: { colors: '#64748b', fontSize: '12px' },
         datetimeFormatter: { month: 'MMM' },
       },
       axisBorder: { color: '#e2e8f0' },
@@ -90,13 +89,13 @@ export default function TrendChart({ data, loading, height = 300 }: TrendChartPr
     },
     yaxis: {
       labels: {
-        style: { colors: '#64748b', fontSize: 12 },
-        formatter: (val) => val.toLocaleString(),
+        style: { colors: '#64748b', fontSize: '12px' },
+        formatter: (val) => Number(val).toLocaleString(),
       },
     },
     tooltip: {
       x: { format: 'yyyy-MM-dd' },
-      style: { fontSize: 14 },
+      style: { fontSize: '14px' },
     },
     legend: {
       show: true,

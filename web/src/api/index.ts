@@ -31,6 +31,7 @@ export interface TrendItem {
   total_tokens: number;
   total_quota: number;
   total_requests: number;
+  total_cost?: number;
 }
 
 export interface TokenUsageItem {

@@ -23,7 +23,7 @@ function getCurrentChinaHour(): number {
 
 // 获取 UTC 时区的当前小时
 function getCurrentUtcHour(): number {
-  return new Date().getHours(); // getHours() 返回本地浏览器时区，即 UTC
+  return new Date().getUTCHours(); // 使用 UTC 小时，与数据库 HOUR() 函数返回的 UTC 值一致
 }
 
 // 生成最近 24 小时的 x 轴标签
@@ -67,20 +67,24 @@ export default function ModelHeatmap({ data, loading }: ModelHeatmapProps) {
     );
   }
 
-  // 按模型分组
+  // 按模型分组并排序（按模型名称字母顺序）
   const modelGroups = data.reduce((acc: Record<string, HeatmapCell[]>, item) => {
     if (!acc[item.model_name]) acc[item.model_name] = [];
     acc[item.model_name].push(item);
     return acc;
   }, {});
 
+  // 提取模型名称并按字母顺序排序
+  const sortedModelNames = Object.keys(modelGroups).sort((a, b) => a.localeCompare(b));
+
   // 当前中国小时
   const currentChinaHour = getCurrentChinaHour();
   // 当前 UTC 小时
   const currentUtcHour = getCurrentUtcHour();
 
-  const series = Object.entries(modelGroups).slice(0, 15).map(([model, cells]) => {
+  const series = sortedModelNames.slice(0, 15).map((model) => {
     const hours: number[] = new Array(24).fill(-1);
+    const cells = modelGroups[model];
 
     cells.forEach(c => {
       // 数据库返回的是 UTC 小时
@@ -121,29 +125,32 @@ export default function ModelHeatmap({ data, loading }: ModelHeatmapProps) {
         radius: 4,
         colorScale: {
           inverse: false,
+          min: -1,
+          max: 100,
           ranges: [
             { from: -1, to: -1, name: '无数据', color: '#f1f5f9' },
-            { from: 0, to: 20, name: '失败多', color: '#ef4444' },
-            { from: 21, to: 40, name: '较差', color: '#f97316' },
-            { from: 41, to: 60, name: '一般', color: '#f59e0b' },
+            { from: 0, to: 0, name: '无成功', color: '#ef4444' },
+            { from: 1, to: 20, name: '失败多', color: '#f97316' },
+            { from: 21, to: 40, name: '较差', color: '#f59e0b' },
+            { from: 41, to: 60, name: '一般', color: '#eab308' },
             { from: 61, to: 80, name: '较好', color: '#84cc16' },
-            { from: 81, to: 100, name: '成功多', color: '#10b981' },
+            { from: 81, to: 100, name: '成功多', color: '#22c55e' },
           ],
         },
       },
     },
     xaxis: {
       categories: labels,
-      labels: { style: { colors: '#64748b', fontSize: 10 } },
+      labels: { style: { colors: '#64748b', fontSize: '10px' } },
       axisBorder: { color: '#e2e8f0' },
     },
-    yaxis: { labels: { style: { colors: '#64748b', fontSize: 10 } } },
+    yaxis: { labels: { style: { colors: '#64748b', fontSize: '10px' } } },
     tooltip: {
       theme: 'light',
       custom: ({ seriesIndex, dataPointIndex, w }) => {
-        const model = w.config.series[seriesIndex].name;
-        const hourLabel = w.config.xaxis.categories[dataPointIndex];
-        const rate = w.config.series[seriesIndex].data[dataPointIndex];
+        const model = String(w.config.series[seriesIndex].name);
+        const hourLabel = String(w.config.xaxis.categories[dataPointIndex]);
+        const rate = Number(w.config.series[seriesIndex].data[dataPointIndex]);
 
         if (rate === -1) {
           return `<div style="padding:12px;background:#fff;border-radius:8px">
@@ -165,17 +172,17 @@ export default function ModelHeatmap({ data, loading }: ModelHeatmapProps) {
           </div>`;
         }
 
-        const reqCount = cell.request_count;
-        const successCount = cell.success_count;
+        const reqCount = Number(cell.request_count);
+        const successCount = Number(cell.success_count);
         const color = rate >= 80 ? '#10b981' : rate >= 50 ? '#f59e0b' : '#ef4444';
 
         return `<div style="padding:12px;background:#fff;border-radius:8px;min-width:180px">
           <div style="font-weight:600;color:#1e293b;margin-bottom:8px;font-size:13px">${model}</div>
-          <div style="color:#64748b;font-size:12">时间: <b>${hourLabel}</b></div>
-          <div style="color:#64748b;font-size:12">UTC: <b>${String(utcHour).padStart(2, '0')}:00</b> / 中国: <b>${String(chinaHour).padStart(2, '0')}:00</b></div>
-          <div style="color:#64748b;font-size:12">总请求: <b>${reqCount}</b></div>
-          <div style="color:#64748b;font-size:12">成功: <b style="color:#10b981">${successCount}</b></div>
-          <div style="color:#64748b;font-size:12">失败: <b style="color:#ef4444">${reqCount - successCount}</b></div>
+          <div style="color:#64748b;font-size:12px">时间: <b>${hourLabel}</b></div>
+          <div style="color:#64748b;font-size:12px">UTC: <b>${String(utcHour).padStart(2, '0')}:00</b> / 中国: <b>${String(chinaHour).padStart(2, '0')}:00</b></div>
+          <div style="color:#64748b;font-size:12px">总请求: <b>${reqCount}</b></div>
+          <div style="color:#64748b;font-size:12px">成功: <b style="color:#10b981">${successCount}</b></div>
+          <div style="color:#64748b;font-size:12px">失败: <b style="color:#ef4444">${reqCount - successCount}</b></div>
           <div style="margin-top:8px;padding:6px 10px;border-radius:6px;background:${color}15;text-align:center">
             <span style="color:${color};font-size:16px;font-weight:700">${rate}%</span>
             <span style="color:${color};font-size:11px;margin-left:4px">成功率</span>
@@ -193,9 +200,10 @@ export default function ModelHeatmap({ data, loading }: ModelHeatmapProps) {
           <p style={{ margin: '4px 0 0', fontSize: 12, color: '#64748b' }}>最近24小时 · 颜色表示成功率</p>
         </div>
         <div style={{ display: 'flex', gap: 12, fontSize: 12, alignItems: 'center' }}>
-          <span style={{ color: '#ef4444' }}>● 失败多</span>
+          <span style={{ color: '#22c55e' }}>● 成功多</span>
+          <span style={{ color: '#84cc16' }}>● 较好</span>
           <span style={{ color: '#f59e0b' }}>● 一般</span>
-          <span style={{ color: '#10b981' }}>● 成功多</span>
+          <span style={{ color: '#ef4444' }}>● 失败多</span>
           <span style={{ color: '#cbd5e1' }}>● 无数据</span>
         </div>
       </div>

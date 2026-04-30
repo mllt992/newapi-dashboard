@@ -49,13 +49,13 @@ export default function TokenUsage() {
     fill: { opacity: [1, 1, 1] },
     stroke: { width: 0 },
     grid: { borderColor: '#e2e8f0', strokeDashArray: 4 },
-    xaxis: { labels: { style: { colors: '#64748b', fontSize: 11 } }, type: 'category' },
-    yaxis: { labels: { style: { colors: '#64748b', fontSize: 11 }, formatter: (val) => (val / 1000000).toFixed(1) + 'M' } },
+    xaxis: { labels: { style: { colors: '#64748b', fontSize: '11px' } }, type: 'category' },
+    yaxis: { labels: { style: { colors: '#64748b', fontSize: '11px' }, formatter: (val) => (Number(val) / 1000000).toFixed(1) + 'M' } },
     dataLabels: { enabled: false },
     legend: { show: true, position: 'top', horizontalAlign: 'right', labels: { colors: '#64748b' } },
     plotOptions: { bar: { columnWidth: '60%' } },
     tooltip: {
-      y: { formatter: (val) => val.toLocaleString() },
+      y: { formatter: (val) => Number(val).toLocaleString() },
     },
   };
 
@@ -78,9 +78,9 @@ export default function TokenUsage() {
           size: '70%',
           labels: {
             show: true,
-            name: { show: true, color: '#64748b', fontSize: 13 },
-            value: { show: true, color: '#1e293b', fontSize: 18, fontWeight: 700, formatter: (val) => (Number(val) / 1000000).toFixed(1) + 'M' },
-            total: { show: true, label: '总计', color: '#94a3b8', fontSize: 12, formatter: () => (pieData.reduce((s, d) => s + d.y, 0) / 1000000).toFixed(1) + 'M' },
+            name: { show: true, color: '#64748b', fontSize: '13px' },
+            value: { show: true, color: '#1e293b', fontSize: '18px', fontWeight: 700, formatter: (val) => (Number(val) / 1000000).toFixed(1) + 'M' },
+            total: { show: true, label: '总计', color: '#94a3b8', fontSize: '12px', formatter: () => (pieData.reduce((s, d) => s + d.y, 0) / 1000000).toFixed(1) + 'M' },
           },
         },
       },
