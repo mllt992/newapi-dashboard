@@ -10,6 +10,8 @@ interface Config {
   PORT: number;
   COST_RATE: number;
   REFRESH_INTERVAL?: number;
+  /** 展示用时区偏移（小时），默认 +8（北京时间）。用于“今日/趋势/小时分布”的本地日界对齐。 */
+  TZ_OFFSET?: number;
 }
 
 // 优先从环境变量读取，否则从配置文件读取
@@ -22,6 +24,7 @@ function getConfig(): Config {
       PORT: parseInt(process.env.PORT || '3002', 10),
       COST_RATE: parseFloat(process.env.COST_RATE || '0.0001'),
       REFRESH_INTERVAL: process.env.REFRESH_INTERVAL ? parseInt(process.env.REFRESH_INTERVAL, 10) : undefined,
+      TZ_OFFSET: process.env.TZ_OFFSET ? parseFloat(process.env.TZ_OFFSET) : undefined,
     };
   }
 
