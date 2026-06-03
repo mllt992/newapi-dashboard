@@ -55,6 +55,11 @@ export interface TopModelItem {
   total_quota: number;
 }
 
+export interface UserListItem {
+  username: string;
+  request_count: number;
+}
+
 export interface HeatmapCell {
   model_name: string;
   hour_bucket: number;
@@ -96,14 +101,16 @@ export const api = {
   getTokenBreakdown: () => http.get<{ data: TokenBreakdown }>('/overview/token-breakdown').then(r => r.data.data),
 
   // Token 用量
-  getTokenUsage: (params: { start?: number; end?: number; model?: string; granularity?: string }) =>
+  getTokenUsage: (params: { start?: number; end?: number; model?: string; users?: string; granularity?: string }) =>
     http.get<{ data: TokenUsageItem[] }>('/tokens/usage', { params }).then(r => r.data.data),
-  getCostBreakdown: (params: { start?: number; end?: number; model?: string; granularity?: string }) =>
+  getCostBreakdown: (params: { start?: number; end?: number; model?: string; users?: string; granularity?: string }) =>
     http.get<{ data: TokenUsageItem[] }>('/tokens/cost', { params }).then(r => r.data.data),
   getTopModels: (params?: { start?: number; end?: number; limit?: number }) =>
     http.get<{ data: TopModelItem[] }>('/tokens/top-models', { params }).then(r => r.data.data),
   getTopUsers: (params?: { start?: number; end?: number; limit?: number }) =>
     http.get<{ data: TopModelItem[] }>('/tokens/top-users', { params }).then(r => r.data.data),
+  getUserList: (params?: { start?: number; end?: number; limit?: number }) =>
+    http.get<{ data: UserListItem[] }>('/tokens/users', { params }).then(r => r.data.data),
 
   // 热力图
   getAvailabilityHeatmap: (params: { start?: number; end?: number; models?: string }) =>

@@ -1,5 +1,6 @@
 import pool from '../db.js';
 import config from '../config.js';
+import { localDayStart, dayIndexExpr, dayIndexToLabel } from '../time.js';
 
 /**
  * quota_data 表聚合查询 - 已按小时预聚合，查询更快
@@ -9,7 +10,8 @@ import config from '../config.js';
  * 今日概览统计
  */
 export async function getTodaySummary() {
-  const todayStart = Math.floor(new Date().setHours(0, 0, 0, 0) / 1000);
+  // “今日”按目标时区（默认 +08:00）的本地午夜，不依赖 Node 容器时区
+  const todayStart = localDayStart();
 
   const [rows] = await pool.execute(
     `SELECT
@@ -48,20 +50,24 @@ export async function getTodaySummary() {
 export async function getTrend(days: number = 7) {
   const startTime = Math.floor(Date.now() / 1000) - days * 86400;
 
+  // 按目标时区的“天”分组（纯算术偏移，时区无关），避免 FROM_UNIXTIME 受 MySQL 会话时区影响导致日界错位
   const [rows] = await pool.execute(
     `SELECT
-      DATE(FROM_UNIXTIME(created_at)) AS date,
+      ${dayIndexExpr('created_at')} AS day_index,
       SUM(token_used) AS total_tokens,
       SUM(quota) AS total_quota,
       SUM(count) AS total_requests
     FROM quota_data
     WHERE created_at >= ?
-    GROUP BY date
-    ORDER BY date ASC`,
+    GROUP BY day_index
+    ORDER BY day_index ASC`,
     [startTime]
   );
   return (rows as any[]).map(row => ({
-    ...row,
+    date: dayIndexToLabel(row.day_index),
+    total_tokens: Number(row.total_tokens || 0),
+    total_quota: Number(row.total_quota || 0),
+    total_requests: Number(row.total_requests || 0),
     total_cost: Number(row.total_tokens || 0) * config.COST_RATE,
   }));
 }
@@ -102,7 +108,8 @@ export async function getRealtimeMetrics() {
   const now = Math.floor(Date.now() / 1000);
   const curHourStart = Math.floor(now / 3600) * 3600;
   const oneHourAgo = now - 3600;
-  const todayStart = Math.floor(new Date().setHours(0, 0, 0, 0) / 1000);
+  // “今日”按目标时区本地午夜（来自时区对齐改动），不依赖 Node 容器时区
+  const todayStart = localDayStart(now);
 
   // 速率窗口对齐到整点桶：quota_data 按整点预聚合，原先用 created_at >= now-3600
   // 命中 1~2 个整点桶却固定除以 3600 秒——整点刚过时当前桶只有几分钟数据，

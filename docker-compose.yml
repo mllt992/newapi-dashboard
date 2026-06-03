@@ -24,6 +24,7 @@ services:
       - PORT=3002
       - COST_RATE=${COST_RATE:-0.0001}
       - REFRESH_INTERVAL=${REFRESH_INTERVAL:-30000}
+      - TZ_OFFSET=${TZ_OFFSET:-8}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3002/api/health"]
