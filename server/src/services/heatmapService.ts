@@ -1,4 +1,5 @@
 import pool from '../db.js';
+import { dayIndexExpr, hourOfDayExpr, dayIndexToLabel } from '../time.js';
 
 /**
  * 热力图查询服务
@@ -50,10 +51,11 @@ export async function getModelAvailabilityHeatmap(params: HeatmapParams) {
 export async function getUsagePatternHeatmap(params: HeatmapParams) {
   const { start, end } = params;
 
+  // 日期/小时按目标时区算术偏移得到，时区无关，避免 FROM_UNIXTIME 受 MySQL 会话时区影响
   let sql = `
     SELECT
-      DATE(FROM_UNIXTIME(created_at)) AS date,
-      HOUR(FROM_UNIXTIME(created_at)) AS hour_of_day,
+      ${dayIndexExpr('created_at')} AS day_index,
+      ${hourOfDayExpr('created_at')} AS hour_of_day,
       COUNT(*) AS request_count,
       SUM(prompt_tokens) AS total_tokens
     FROM logs
@@ -64,10 +66,15 @@ export async function getUsagePatternHeatmap(params: HeatmapParams) {
   if (start) { sql += ' AND created_at >= ?'; args.push(start); }
   if (end) { sql += ' AND created_at <= ?'; args.push(end); }
 
-  sql += ' GROUP BY date, hour_of_day ORDER BY date, hour_of_day';
+  sql += ' GROUP BY day_index, hour_of_day ORDER BY day_index, hour_of_day';
 
   const [rows] = await pool.execute(sql, args);
-  return rows;
+  return (rows as any[]).map(row => ({
+    date: dayIndexToLabel(row.day_index),
+    hour_of_day: Number(row.hour_of_day),
+    request_count: Number(row.request_count || 0),
+    total_tokens: Number(row.total_tokens || 0),
+  }));
 }
 
 /**
