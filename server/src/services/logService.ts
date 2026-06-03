@@ -9,6 +9,7 @@ interface LogQueryParams {
   start?: number;
   end?: number;
   model?: string;
+  users?: string[];
   granularity?: 'hour' | 'day';
   limit?: number;
   offset?: number;
@@ -22,7 +23,7 @@ interface LogQueryParams {
  * 不能把 cache_tokens 当成独立于 prompt_tokens 的类别，否则会重复计数。
  */
 export async function getTokenUsage(params: LogQueryParams) {
-  const { start, end, model, granularity = 'day', limit = 100, offset = 0 } = params;
+  const { start, end, model, users, granularity = 'day', limit = 100, offset = 0 } = params;
 
   let sql = `
     SELECT
@@ -42,6 +43,7 @@ export async function getTokenUsage(params: LogQueryParams) {
   if (start) { sql += ' AND created_at >= ?'; args.push(start); }
   if (end) { sql += ' AND created_at <= ?'; args.push(end); }
   if (model) { sql += ' AND model_name = ?'; args.push(model); }
+  if (users && users.length) { sql += ` AND username IN (${users.map(() => '?').join(',')})`; args.push(...users); }
 
   sql += ` GROUP BY time_bucket, model_name ORDER BY time_bucket DESC LIMIT ${Number(limit)} OFFSET ${Number(offset)}`;
 
@@ -66,7 +68,7 @@ export async function getTokenUsage(params: LogQueryParams) {
  * 花费明细查询
  */
 export async function getCostBreakdown(params: LogQueryParams) {
-  const { start, end, model, granularity = 'day' } = params;
+  const { start, end, model, users, granularity = 'day' } = params;
 
   let sql = `
     SELECT
@@ -82,6 +84,7 @@ export async function getCostBreakdown(params: LogQueryParams) {
   if (start) { sql += ' AND created_at >= ?'; args.push(start); }
   if (end) { sql += ' AND created_at <= ?'; args.push(end); }
   if (model) { sql += ' AND model_name = ?'; args.push(model); }
+  if (users && users.length) { sql += ` AND username IN (${users.map(() => '?').join(',')})`; args.push(...users); }
 
   sql += ` GROUP BY time_bucket, model_name ORDER BY time_bucket DESC`;
 
@@ -138,6 +141,30 @@ export async function getTopUsers(params: { start?: number; end?: number; limit?
   if (end) { sql += ' AND created_at <= ?'; args.push(end); }
 
   sql += ` GROUP BY username ORDER BY total_quota DESC LIMIT ${Number(limit)}`;
+
+  const [rows] = await pool.query(sql, args);
+  return rows;
+}
+
+/**
+ * 用户名列表（用于筛选下拉框）— 去重后按消费额排序，最活跃的用户在前
+ */
+export async function getUserList(params: { start?: number; end?: number; limit?: number }) {
+  const { start, end, limit = 500 } = params;
+
+  let sql = `
+    SELECT
+      username,
+      COUNT(*) AS request_count
+    FROM logs
+    WHERE type = 2 AND username IS NOT NULL AND username <> ''
+  `;
+  const args: any[] = [];
+
+  if (start) { sql += ' AND created_at >= ?'; args.push(start); }
+  if (end) { sql += ' AND created_at <= ?'; args.push(end); }
+
+  sql += ` GROUP BY username ORDER BY SUM(quota) DESC LIMIT ${Number(limit)}`;
 
   const [rows] = await pool.query(sql, args);
   return rows;
