@@ -11,6 +11,8 @@ export default function TokenUsage() {
   const [data, setData] = useState<TokenUsageItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [model, setModel] = useState<string | undefined>();
+  const [users, setUsers] = useState<string[]>([]);
+  const [userOptions, setUserOptions] = useState<string[]>([]);
   const [granularity, setGranularity] = useState<string>('day');
   const [range, setRange] = useState<[Dayjs, Dayjs]>([dayjs().subtract(7, 'day'), dayjs()]);
 
@@ -20,11 +22,20 @@ export default function TokenUsage() {
       start: range[0].startOf('day').unix(),
       end: range[1].endOf('day').unix(),
       model,
+      users: users.length ? users.join(',') : undefined,
       granularity,
     }).then(setData).finally(() => setLoading(false));
   };
 
-  useEffect(() => { fetchData(); }, [model, granularity, range]);
+  useEffect(() => { fetchData(); }, [model, users, granularity, range]);
+
+  // 拉取用户列表作为筛选选项（按所选时间范围内的活跃用户）
+  useEffect(() => {
+    api.getUserList({
+      start: range[0].startOf('day').unix(),
+      end: range[1].endOf('day').unix(),
+    }).then((list) => setUserOptions(list.map((u) => u.username))).catch(() => {});
+  }, [range]);
 
   // 按时间分组汇总。
   // New API 中 prompt_tokens 已包含命中缓存(cache)与缓存创建(creation)，
@@ -113,6 +124,12 @@ export default function TokenUsage() {
         <Select
           allowClear placeholder="全部模型" value={model} onChange={setModel} style={{ width: 200 }} showSearch filterOption={(input, option) => (option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
           options={[...new Set(data.map((d) => d.model_name))].map((m) => ({ label: m, value: m }))}
+        />
+        <Select
+          mode="multiple" allowClear placeholder="全部用户" value={users} onChange={setUsers}
+          style={{ minWidth: 220, maxWidth: 420 }} maxTagCount="responsive" showSearch
+          filterOption={(input, option) => String(option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
+          options={[...new Set([...userOptions, ...users])].map((u) => ({ label: u, value: u }))}
         />
       </div>
 
