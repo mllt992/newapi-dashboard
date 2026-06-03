@@ -232,14 +232,20 @@ export default function Dashboard() {
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
               <span style={{ fontSize: 11, color: '#64748b' }}>累计 Token 总量</span>
+              {/* 全时段累计取自 quota_data（永久聚合），与「Token 总量(N天)」下的累计同源；
+                  logs 表会被清理，不能用作全时段口径 */}
               <span style={{ fontSize: 18, fontWeight: 700, color: '#0ea5e9' }}>
-                {tokenBreakdown ? formatBig(tokenBreakdown.total_tokens) : '—'}
+                {summary?.total_tokens_all !== undefined ? formatBig(Number(summary.total_tokens_all)) : '—'}
               </span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6, fontSize: 10, color: '#94a3b8', lineHeight: 1.4 }}>
               <span>未命中 <span style={{ color: '#6366f1' }}>{tokenBreakdown ? formatBig(tokenBreakdown.total_cache_miss_tokens) : '—'}</span></span>
               <span>命中 <span style={{ color: '#10b981' }}>{tokenBreakdown ? formatBig(tokenBreakdown.total_cache_tokens) : '—'}</span></span>
               <span>输出 <span style={{ color: '#f59e0b' }}>{tokenBreakdown ? formatBig(tokenBreakdown.total_completion_tokens) : '—'}</span></span>
+            </div>
+            {/* 明细来自 logs（含缓存拆分），仅覆盖已留存日志，非全时段，故与上方总量不构成精确子集 */}
+            <div style={{ marginTop: 4, fontSize: 9, color: '#cbd5e1', lineHeight: 1.2 }}>
+              明细为已留存日志统计，非全时段
             </div>
           </div>
         </Col>
