@@ -102,13 +102,23 @@ export async function getModelSummary(start?: number, end?: number) {
 /**
  * 获取实时指标 (RPM, TPM, 并发数等)
  * 注意：quota_data 已按小时预聚合，created_at 为整点时间戳。
- * 5 分钟窗口几乎总是命中 0 行，故速率改为基于最近 1 小时数据反推。
+ * 速率窗口对齐到整点桶并按真实经过时长折算，避免「除以整小时」导致的低估。
  */
 export async function getRealtimeMetrics() {
   const now = Math.floor(Date.now() / 1000);
+  const curHourStart = Math.floor(now / 3600) * 3600;
   const oneHourAgo = now - 3600;
-  const threeHoursAgo = now - 3 * 3600;
+  // “今日”按目标时区本地午夜（来自时区对齐改动），不依赖 Node 容器时区
   const todayStart = localDayStart(now);
+
+  // 速率窗口对齐到整点桶：quota_data 按整点预聚合，原先用 created_at >= now-3600
+  // 命中 1~2 个整点桶却固定除以 3600 秒——整点刚过时当前桶只有几分钟数据，
+  // RPM/TPM 被严重低估（如 HH:05 低估约 12 倍）并随分钟跳变。
+  // 改为「上一个完整小时 + 当前未完成小时」窗口，并除以真实经过时长。
+  const primaryStart = curHourStart - 3600;        // 覆盖 [上一整点, now]
+  const primarySpan = now - primaryStart;          // = 3600 + 本小时已过秒数 ∈ [3600, 7200)
+  const wideStart = curHourStart - 3 * 3600;       // 稀疏流量回退窗口（前 3 完整小时 + 当前）
+  const wideSpan = now - wideStart;
 
   // 并发：最近 1 小时内活跃模型数（按小时聚合，分钟粒度无意义）
   const [concurrentRows] = await pool.execute(
@@ -132,41 +142,42 @@ export async function getRealtimeMetrics() {
   const todayRequests = Number(todayData[0]?.total_requests || 0);
   const todayTokens = Number(todayData[0]?.total_tokens || 0);
 
-  // 最近 1 小时
-  const [oneHourRows] = await pool.execute(
+  // 主速率窗口：上一个完整小时 + 当前未完成小时
+  const [primaryRows] = await pool.execute(
     `SELECT
       SUM(count) AS total_requests,
       SUM(token_used) AS total_tokens
      FROM quota_data
      WHERE created_at >= ?`,
-    [oneHourAgo]
+    [primaryStart]
   );
-  const oneHourData = oneHourRows as any[];
-  const requests1h = Number(oneHourData[0]?.total_requests || 0);
-  const tokens1h = Number(oneHourData[0]?.total_tokens || 0);
+  const primaryData = primaryRows as any[];
+  const requestsPrimary = Number(primaryData[0]?.total_requests || 0);
+  const tokensPrimary = Number(primaryData[0]?.total_tokens || 0);
 
-  // 最近 3 小时（用于在整点边界附近平滑速率）
-  const [threeHourRows] = await pool.execute(
+  // 回退窗口：主窗口无流量时改用更宽窗口，避免间歇性流量下显示 0
+  const [wideRows] = await pool.execute(
     `SELECT
       SUM(count) AS total_requests,
       SUM(token_used) AS total_tokens
      FROM quota_data
      WHERE created_at >= ?`,
-    [threeHoursAgo]
+    [wideStart]
   );
-  const threeHourData = threeHourRows as any[];
-  const requests3h = Number(threeHourData[0]?.total_requests || 0);
-  const tokens3h = Number(threeHourData[0]?.total_tokens || 0);
+  const wideData = wideRows as any[];
+  const requestsWide = Number(wideData[0]?.total_requests || 0);
+  const tokensWide = Number(wideData[0]?.total_tokens || 0);
 
-  // 速率：优先用 1 小时窗口，0 则回退到 3 小时均值
-  const rpsBase = requests1h > 0 ? requests1h / 3600 : requests3h / (3 * 3600);
-  const tpsBase = tokens1h > 0 ? tokens1h / 3600 : tokens3h / (3 * 3600);
-  const rpm = Math.round(rpsBase * 60);
-  const tpm = Math.round(tpsBase * 60);
+  // 按窗口真实经过时长折算速率，杜绝「除以整小时」造成的系统性低估；
+  // 主窗口无流量时回退到更宽窗口（同样按真实时长折算）。
+  const rps = requestsPrimary > 0 ? requestsPrimary / primarySpan : requestsWide / wideSpan;
+  const tps = tokensPrimary > 0 ? tokensPrimary / primarySpan : tokensWide / wideSpan;
+  const rpm = Math.round(rps * 60);
+  const tpm = Math.round(tps * 60);
 
-  // 兼容字段：requests_5min / tokens_5min 用 1 小时折算
-  const requests5min = Math.round(requests1h / 12);
-  const tokens5min = Math.round(tokens1h / 12);
+  // 兼容字段（前端未使用）：按当前速率折算 5 分钟量
+  const requests5min = Math.round(rps * 300);
+  const tokens5min = Math.round(tps * 300);
 
   const todayCost = todayTokens * config.COST_RATE;
 
@@ -179,8 +190,8 @@ export async function getRealtimeMetrics() {
     today_cost: todayCost,
     requests_5min: requests5min,
     tokens_5min: tokens5min,
-    requests_1h: requests1h,
-    tokens_1h: tokens1h,
+    requests_1h: requestsPrimary,
+    tokens_1h: tokensPrimary,
     server_time: now,
   };
 }
