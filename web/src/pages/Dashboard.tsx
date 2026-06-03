@@ -237,9 +237,9 @@ export default function Dashboard() {
               </span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6, fontSize: 10, color: '#94a3b8', lineHeight: 1.4 }}>
-              <span>输入 <span style={{ color: '#10b981' }}>{tokenBreakdown ? formatBig(tokenBreakdown.total_prompt_tokens) : '—'}</span></span>
+              <span>未命中 <span style={{ color: '#6366f1' }}>{tokenBreakdown ? formatBig(tokenBreakdown.total_cache_miss_tokens) : '—'}</span></span>
+              <span>命中 <span style={{ color: '#10b981' }}>{tokenBreakdown ? formatBig(tokenBreakdown.total_cache_tokens) : '—'}</span></span>
               <span>输出 <span style={{ color: '#f59e0b' }}>{tokenBreakdown ? formatBig(tokenBreakdown.total_completion_tokens) : '—'}</span></span>
-              <span>缓存 <span style={{ color: '#8b5cf6' }}>{tokenBreakdown ? formatBig(tokenBreakdown.total_cache_tokens) : '—'}</span></span>
             </div>
           </div>
         </Col>

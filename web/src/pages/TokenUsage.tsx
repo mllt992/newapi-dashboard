@@ -26,13 +26,16 @@ export default function TokenUsage() {
 
   useEffect(() => { fetchData(); }, [model, granularity, range]);
 
-  // 按时间分组汇总
-  const timeGroups = data.reduce((acc: Record<string, { prompt: number; completion: number; cache: number }>, item) => {
+  // 按时间分组汇总。
+  // New API 中 prompt_tokens 已包含命中缓存(cache)与缓存创建(creation)，
+  // 故输入侧拆成互不重叠的三块：未命中缓存(miss)+命中缓存(cache)+缓存创建(creation)=prompt。
+  const timeGroups = data.reduce((acc: Record<string, { miss: number; cache: number; creation: number; completion: number }>, item) => {
     const time = item.time_bucket;
-    if (!acc[time]) acc[time] = { prompt: 0, completion: 0, cache: 0 };
-    acc[time].prompt += Number(item.total_prompt_tokens);
-    acc[time].completion += Number(item.total_completion_tokens);
+    if (!acc[time]) acc[time] = { miss: 0, cache: 0, creation: 0, completion: 0 };
+    acc[time].miss += Number(item.total_cache_miss_tokens || 0);
     acc[time].cache += Number(item.total_cache_tokens || 0);
+    acc[time].creation += Number(item.total_cache_creation_tokens || 0);
+    acc[time].completion += Number(item.total_completion_tokens);
     return acc;
   }, {});
 
@@ -40,13 +43,17 @@ export default function TokenUsage() {
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([time, vals]) => ({
       x: time,
-      y: [vals.prompt, vals.completion, vals.cache],
+      y: [vals.miss, vals.cache, vals.creation, vals.completion],
     }));
+
+  // 未命中缓存 / 缓存命中 / 缓存创建 / 输出
+  const SERIES_COLORS = ['#6366f1', '#10b981', '#8b5cf6', '#f59e0b'];
+  const SERIES_LABELS = ['未命中缓存', '缓存命中', '缓存创建', '输出Token'];
 
   const tokenOptions: ApexCharts.ApexOptions = {
     chart: { type: 'bar', stacked: true, background: 'transparent', toolbar: { show: false }, animations: { enabled: true } },
-    colors: ['#6366f1', '#f59e0b', '#10b981'],
-    fill: { opacity: [1, 1, 1] },
+    colors: SERIES_COLORS,
+    fill: { opacity: 1 },
     stroke: { width: 0 },
     grid: { borderColor: '#e2e8f0', strokeDashArray: 4 },
     xaxis: { labels: { style: { colors: '#64748b', fontSize: '11px' } }, type: 'category' },
@@ -59,16 +66,20 @@ export default function TokenUsage() {
     },
   };
 
+  const sumBy = (k: 'miss' | 'cache' | 'creation' | 'completion') =>
+    Object.values(timeGroups).reduce((s, v) => s + v[k], 0);
+
   const pieData = [
-    { x: '输入Token', y: Object.values(timeGroups).reduce((s, v) => s + v.prompt, 0) },
-    { x: '输出Token', y: Object.values(timeGroups).reduce((s, v) => s + v.completion, 0) },
-    { x: '缓存Token', y: Object.values(timeGroups).reduce((s, v) => s + v.cache, 0) },
+    { x: SERIES_LABELS[0], y: sumBy('miss') },
+    { x: SERIES_LABELS[1], y: sumBy('cache') },
+    { x: SERIES_LABELS[2], y: sumBy('creation') },
+    { x: SERIES_LABELS[3], y: sumBy('completion') },
   ];
 
   const pieOptions: ApexCharts.ApexOptions = {
     chart: { type: 'donut', background: 'transparent', animations: { enabled: true, speed: 800 } },
-    colors: ['#6366f1', '#f59e0b', '#10b981'],
-    labels: ['输入Token', '输出Token', '缓存Token'],
+    colors: SERIES_COLORS,
+    labels: SERIES_LABELS,
     stroke: { show: true, width: 3, colors: ['#fff'] },
     dataLabels: { enabled: false },
     legend: { show: true, position: 'bottom', labels: { colors: '#64748b' } },
@@ -89,10 +100,10 @@ export default function TokenUsage() {
 
   const containerStyle = { padding: 24, borderRadius: 20, background: '#f8fafc', border: '1px solid #e2e8f0' };
 
-  // 计算缓存命中率
-  const totalPrompt = pieData[0].y;
-  const totalCache = pieData[2].y;
-  const cacheHitRate = totalPrompt > 0 ? ((totalCache / totalPrompt) * 100).toFixed(1) : '0.0';
+  // 缓存命中率 = 命中缓存 / 输入总量(未命中+命中+创建)
+  const totalCache = sumBy('cache');
+  const totalInput = sumBy('miss') + totalCache + sumBy('creation');
+  const cacheHitRate = totalInput > 0 ? ((totalCache / totalInput) * 100).toFixed(1) : '0.0';
 
   return (
     <Spin spinning={loading}>
@@ -110,15 +121,11 @@ export default function TokenUsage() {
           <div style={containerStyle}>
             <div style={{ marginBottom: 20 }}>
               <h3 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: '#1e293b' }}>Token 用量分析</h3>
-              <p style={{ margin: '8px 0 0', fontSize: 13, color: '#64748b' }}>输入/输出/缓存Token分布 · 缓存命中率 {cacheHitRate}%</p>
+              <p style={{ margin: '8px 0 0', fontSize: 13, color: '#64748b' }}>未命中/命中/缓存创建/输出 分布 · 缓存命中率 {cacheHitRate}%</p>
             </div>
             <ReactApexChart
               type="bar"
-              series={[
-                { name: '输入Token', data: chartData.map(d => ({ x: d.x, y: d.y[0] })) },
-                { name: '输出Token', data: chartData.map(d => ({ x: d.x, y: d.y[1] })) },
-                { name: '缓存Token', data: chartData.map(d => ({ x: d.x, y: d.y[2] })) },
-              ]}
+              series={SERIES_LABELS.map((name, i) => ({ name, data: chartData.map(d => ({ x: d.x, y: d.y[i] })) }))}
               options={tokenOptions}
               height={350}
             />
@@ -142,7 +149,7 @@ export default function TokenUsage() {
   );
 }
 
-type DetailKey = 'time_bucket' | 'model_name' | 'request_count' | 'total_prompt_tokens' | 'total_completion_tokens' | 'total_cache_tokens' | 'cache_hit_rate' | 'total_cost';
+type DetailKey = 'time_bucket' | 'model_name' | 'request_count' | 'total_cache_miss_tokens' | 'total_cache_tokens' | 'total_cache_creation_tokens' | 'total_completion_tokens' | 'cache_hit_rate' | 'total_cost';
 
 function DetailTable({ data }: { data: TokenUsageItem[] }) {
   const { sorted, state } = useSortable<TokenUsageItem, DetailKey>(
@@ -161,9 +168,10 @@ function DetailTable({ data }: { data: TokenUsageItem[] }) {
     { key: 'time_bucket', label: '时间' },
     { key: 'model_name', label: '模型' },
     { key: 'request_count', label: '请求数' },
-    { key: 'total_prompt_tokens', label: '输入Token' },
+    { key: 'total_cache_miss_tokens', label: '未命中缓存' },
+    { key: 'total_cache_tokens', label: '缓存命中' },
+    { key: 'total_cache_creation_tokens', label: '缓存创建' },
     { key: 'total_completion_tokens', label: '输出Token' },
-    { key: 'total_cache_tokens', label: '缓存Token' },
     { key: 'cache_hit_rate', label: '缓存命中率', align: 'right' },
     { key: 'total_cost', label: '金额(元)' },
   ];
@@ -200,6 +208,9 @@ function DetailTable({ data }: { data: TokenUsageItem[] }) {
           {sorted.slice(0, 30).map((item, i) => {
             const prompt = Number(item.total_prompt_tokens);
             const cache = Number(item.total_cache_tokens || 0);
+            const creation = Number(item.total_cache_creation_tokens || 0);
+            const miss = Number(item.total_cache_miss_tokens ?? Math.max(prompt - cache - creation, 0));
+            // 命中率 = 命中缓存 / 输入总量(prompt)
             const hitRate = prompt > 0 ? ((cache / prompt) * 100).toFixed(1) : '0.0';
             const bgColor = Number(hitRate) >= 30 ? '#10b98115' : Number(hitRate) >= 10 ? '#f59e0b15' : '#ef444415';
             return (
@@ -207,9 +218,10 @@ function DetailTable({ data }: { data: TokenUsageItem[] }) {
                 <td style={{ padding: '14px 12px', color: '#475569', fontSize: 13 }}>{item.time_bucket}</td>
                 <td style={{ padding: '14px 12px', color: '#6366f1', fontSize: 13 }}>{item.model_name}</td>
                 <td style={{ padding: '14px 12px', color: '#475569', fontSize: 13 }}>{item.request_count}</td>
-                <td style={{ padding: '14px 12px', color: '#475569', fontSize: 13 }}>{prompt.toLocaleString()}</td>
-                <td style={{ padding: '14px 12px', color: '#475569', fontSize: 13 }}>{Number(item.total_completion_tokens).toLocaleString()}</td>
+                <td style={{ padding: '14px 12px', color: '#6366f1', fontSize: 13 }}>{miss.toLocaleString()}</td>
                 <td style={{ padding: '14px 12px', color: '#10b981', fontSize: 13 }}>{cache.toLocaleString()}</td>
+                <td style={{ padding: '14px 12px', color: '#8b5cf6', fontSize: 13 }}>{creation.toLocaleString()}</td>
+                <td style={{ padding: '14px 12px', color: '#475569', fontSize: 13 }}>{Number(item.total_completion_tokens).toLocaleString()}</td>
                 <td style={{ padding: '14px 12px', textAlign: 'right' }}>
                   <span style={{ padding: '4px 10px', borderRadius: 20, fontSize: 12, fontWeight: 600, background: bgColor, color: Number(hitRate) >= 30 ? '#10b981' : Number(hitRate) >= 10 ? '#f59e0b' : '#ef4444' }}>
                     {hitRate}%

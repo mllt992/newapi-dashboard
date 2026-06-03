@@ -41,6 +41,8 @@ export interface TokenUsageItem {
   total_prompt_tokens: number;
   total_completion_tokens: number;
   total_cache_tokens: number;
+  total_cache_creation_tokens: number;
+  total_cache_miss_tokens: number;
   total_quota: number;
   total_cost: number;
 }
@@ -80,6 +82,8 @@ export interface TokenBreakdown {
   total_prompt_tokens: number;
   total_completion_tokens: number;
   total_cache_tokens: number;
+  total_cache_creation_tokens: number;
+  total_cache_miss_tokens: number;
   total_tokens: number;
   total_requests: number;
 }
