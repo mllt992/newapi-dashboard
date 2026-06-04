@@ -38,8 +38,8 @@ export default function TokenUsage() {
   }, [range]);
 
   // 按时间分组汇总。
-  // New API 中 prompt_tokens 已包含命中缓存(cache)与缓存创建(creation)，
-  // 故输入侧拆成互不重叠的三块：未命中缓存(miss)+命中缓存(cache)+缓存创建(creation)=prompt。
+  // 缓存口径随上游厂商不同（后端 SQL_CACHE_MISS 已逐行算好 miss）：
+  // 输入侧拆成互不重叠的三块——未命中缓存(miss)+命中缓存(cache)+缓存创建(creation)=输入总量。
   const timeGroups = data.reduce((acc: Record<string, { miss: number; cache: number; creation: number; completion: number }>, item) => {
     const time = item.time_bucket;
     if (!acc[time]) acc[time] = { miss: 0, cache: 0, creation: 0, completion: 0 };
@@ -227,8 +227,9 @@ function DetailTable({ data }: { data: TokenUsageItem[] }) {
             const cache = Number(item.total_cache_tokens || 0);
             const creation = Number(item.total_cache_creation_tokens || 0);
             const miss = Number(item.total_cache_miss_tokens ?? Math.max(prompt - cache - creation, 0));
-            // 命中率 = 命中缓存 / 输入总量(prompt)
-            const hitRate = prompt > 0 ? ((cache / prompt) * 100).toFixed(1) : '0.0';
+            // 命中率 = 命中缓存 / 输入总量(未命中 + 命中 + 创建)
+            const input = miss + cache + creation;
+            const hitRate = input > 0 ? ((cache / input) * 100).toFixed(1) : '0.0';
             const bgColor = Number(hitRate) >= 30 ? '#10b98115' : Number(hitRate) >= 10 ? '#f59e0b15' : '#ef444415';
             return (
               <tr key={i} style={{ borderBottom: '1px solid #f1f5f9' }}>
