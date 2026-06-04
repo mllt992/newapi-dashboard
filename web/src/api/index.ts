@@ -89,6 +89,8 @@ export interface TokenBreakdown {
   total_cache_tokens: number;
   total_cache_creation_tokens: number;
   total_cache_miss_tokens: number;
+  /** 输入总量 = 未命中 + 命中 + 创建 */
+  total_input_tokens: number;
   total_tokens: number;
   total_requests: number;
 }

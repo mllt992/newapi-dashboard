@@ -238,9 +238,10 @@ export default function Dashboard() {
                 {summary?.total_tokens_all !== undefined ? formatBig(Number(summary.total_tokens_all)) : '—'}
               </span>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6, fontSize: 10, color: '#94a3b8', lineHeight: 1.4 }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 10px', marginTop: 6, fontSize: 10, color: '#94a3b8', lineHeight: 1.4 }}>
               <span>未命中 <span style={{ color: '#6366f1' }}>{tokenBreakdown ? formatBig(tokenBreakdown.total_cache_miss_tokens) : '—'}</span></span>
               <span>命中 <span style={{ color: '#10b981' }}>{tokenBreakdown ? formatBig(tokenBreakdown.total_cache_tokens) : '—'}</span></span>
+              <span>创建 <span style={{ color: '#8b5cf6' }}>{tokenBreakdown ? formatBig(tokenBreakdown.total_cache_creation_tokens) : '—'}</span></span>
               <span>输出 <span style={{ color: '#f59e0b' }}>{tokenBreakdown ? formatBig(tokenBreakdown.total_completion_tokens) : '—'}</span></span>
             </div>
             {/* 明细来自 logs（含缓存拆分），仅覆盖已留存日志，非全时段，故与上方总量不构成精确子集 */}
